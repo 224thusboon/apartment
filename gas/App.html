@@ -652,7 +652,8 @@
   // ---------- ตั้งค่า ----------
   async function adminSettings() {
     const s = (await loadAdmin()).settings;
-    const docUrl = (id) => id ? `https://docs.google.com/document/d/${encodeURIComponent(id)}/edit` : '';
+    // หมายเหตุ: เขียน :\/\/ แทน :// เพราะ Apps Script ตัดข้อความหลัง // ในสคริปต์ทิ้ง (คิดว่าเป็นคอมเมนต์)
+    const docUrl = (id) => id ? `https:\/\/docs.google.com/document/d/${encodeURIComponent(id)}/edit` : '';
     $('#view').innerHTML = `
       ${sec('ตั้งค่า', `ข้อมูลหอพัก & <span class="accent">อัตราค่าบริการ</span>`)}
       <form id="setForm" class="cols">
@@ -685,7 +686,7 @@
         <p class="row">
           ${s.invoiceTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="${docUrl(s.invoiceTemplateId)}">แม่แบบใบแจ้งหนี้</a>` : ''}
           ${s.contractTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="${docUrl(s.contractTemplateId)}">แม่แบบสัญญาเช่า</a>` : ''}
-          ${s.rootFolderId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https://drive.google.com/drive/folders/${encodeURIComponent(s.rootFolderId)}">โฟลเดอร์ Drive</a>` : ''}
+          ${s.rootFolderId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https:\/\/drive.google.com/drive/folders/${encodeURIComponent(s.rootFolderId)}">โฟลเดอร์ Drive</a>` : ''}
         </p>
       </div>`;
     $('#setForm').onsubmit = (e) => {
