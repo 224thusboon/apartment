@@ -261,6 +261,17 @@
   .viewer img { max-width: 100%; border-radius: 12px; }
   .pdf-pages { display: grid; gap: 10px; }
   .pdf-pages canvas { display: block; background: #fff; border-radius: 8px; box-shadow: var(--shadow); }
+  #printArea { display: none; }
+  @media print {
+    @page { size: A4; margin: 0; }
+    html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; }
+    body > *:not(#printArea) { display: none !important; }
+    #printArea { display: block !important; }
+    #printArea img { display: block; width: 100%; break-after: page; page-break-after: always; }
+    #printArea img:last-child { break-after: auto; page-break-after: auto; }
+    #printArea.is-img { padding: 10mm; }
+    #printArea.is-img img { width: auto; max-width: 100%; max-height: 277mm; margin: 0 auto; object-fit: contain; }
+  }
   .tenant-head { display: flex; gap: 14px; align-items: center; }
   .avatar { width: 52px; height: 52px; border-radius: 50%; display: grid; place-items: center; flex: none;
     background: var(--accent); color: #fff; font-family: var(--head); font-weight: 600; font-size: 20px; }

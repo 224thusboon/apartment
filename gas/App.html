@@ -43,6 +43,7 @@
     shield: '<path d="M12 3 4 6v6c0 4.5 3.4 8.3 8 9 4.6-.7 8-4.5 8-9V6z"/><path d="m9 12 2 2 4-4"/>',
     phone: '<path d="M5 3h4l2 5-2.5 1.5a11 11 0 0 0 6 6L16 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2z"/>',
     file: '<path d="M14 3H6v18h12V7z"/><path d="M14 3v4h4M9 13h6M9 17h6"/>',
+    print: '<path d="M7 8V3h10v5"/><rect x="3" y="8" width="18" height="9" rx="2"/><path d="M7 14h10v7H7z"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/>',
@@ -247,6 +248,38 @@
     }
   }
 
+  // พิมพ์เอกสาร: วาดแต่ละหน้าเป็นรูปความละเอียดสูงในพื้นที่พิมพ์ แล้วสั่งพิมพ์เฉพาะส่วนนั้น
+  async function printDoc(pdfBytes, imgUrl) {
+    let area = $('#printArea');
+    if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
+    area.innerHTML = '';
+    area.className = pdfBytes ? 'is-pdf' : 'is-img';
+    const add = (src) => new Promise((ok) => {
+      const im = new Image();
+      im.onload = im.onerror = () => ok();
+      im.src = src;
+      area.appendChild(im);
+    });
+    if (pdfBytes) {
+      const lib = await loadPdfJs();
+      const pdf = await lib.getDocument({ data: pdfBytes, cMapUrl: PDFJS + 'cmaps/', cMapPacked: true }).promise;
+      for (let n = 1; n <= pdf.numPages; n++) {
+        const page = await pdf.getPage(n);
+        const vp = page.getViewport({ scale: 2.5 });
+        const c = document.createElement('canvas');
+        c.width = Math.floor(vp.width);
+        c.height = Math.floor(vp.height);
+        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+        await add(c.toDataURL('image/jpeg', 0.92));
+      }
+    } else {
+      await add(imgUrl);
+    }
+    const done = () => { area.innerHTML = ''; window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    window.print();
+  }
+
   async function viewFile(fileId, title) {
     const body = openModal(title || 'ไฟล์', '<div class="center muted">กำลังโหลดไฟล์…</div>');
     try {
@@ -258,7 +291,17 @@
       const isImg = f.mimeType.indexOf('image/') === 0;
       const isPdf = f.mimeType === 'application/pdf';
       body.innerHTML = `<div class="viewer">${isImg ? `<img src="${url}" alt="">` : isPdf ? '<div class="pdf-pages"><div class="center muted">กำลังแสดง PDF…</div></div>' : ''}</div>
-        <p><a class="btn ghost" href="${url}" download="${esc(f.name)}">ดาวน์โหลด ${esc(f.name)}</a></p>`;
+        <p class="row">${isImg || isPdf ? `<button type="button" class="btn" id="btnPrint">${ic('print')} พิมพ์</button>` : ''}
+        <a class="btn ghost" href="${url}" download="${esc(f.name)}">ดาวน์โหลด ${esc(f.name)}</a></p>`;
+      const pb = $('#btnPrint', body);
+      if (pb) pb.onclick = async () => {
+        pb.disabled = true;
+        const old = pb.innerHTML;
+        pb.textContent = 'กำลังเตรียมพิมพ์…';
+        try { await printDoc(isPdf ? bytes.slice() : null, isImg ? url : null); }
+        catch (err) { toast('พิมพ์ไม่ได้: ' + err.message); }
+        pb.disabled = false; pb.innerHTML = old;
+      };
       if (isPdf) {
         const box = $('.pdf-pages', body);
         try { await renderPdf(bytes.slice(), box); } catch (err) { box.innerHTML = `<p class="muted">แสดง PDF ไม่ได้ (${esc(err.message)}) กดดาวน์โหลดเพื่อเปิดดูแทน</p>`; }
