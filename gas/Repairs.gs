@@ -5,7 +5,7 @@
 
 /** แอดมินบันทึก/แก้ไขงานซ่อม  photos: [{name,mimeType,data}] */
 function apiSaveRepair(token, repair, photos) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const settings = getSettings_();
   const old = repair.id ? fsGet_(COL.REPAIRS, repair.id) : null;
   const photoIds = (old && old.photoIds) || [];
@@ -39,6 +39,8 @@ function apiSaveRepair(token, repair, photos) {
     saved.chargeId = c.id;
   }
   // ค่าใช้จ่ายงานซ่อมเข้าบัญชีรายจ่ายอัตโนมัติ (ดู Accounts.gs) ไม่ต้องบันทึกซ้ำ
+  audit_(me, old ? 'แก้ไขงานซ่อม' : 'บันทึกงานซ่อม', 'ห้อง ' + repair.roomId + ' · ' + (repair.title || ''),
+    'ค่าใช้จ่าย ' + money_(cost) + (old && Number(old.cost) !== cost ? ' (เดิม ' + money_(old.cost) + ')' : '') + ' · สถานะ ' + saved.status);
   return saved;
 }
 
@@ -58,10 +60,12 @@ function apiReportRepair(token, data, photos) {
   const photoIds = (photos || []).slice(0, 3).map(function (p) {
     return saveUpload_(settings.photoFolderId, p, s.roomId, 'repair');
   });
-  return fsSet_(COL.REPAIRS, null, {
+  const saved = fsSet_(COL.REPAIRS, null, {
     roomId: s.roomId, date: today_(), title: data.title, detail: data.detail || '',
     parts: '', cost: 0, status: 'reported', reportedBy: 'tenant', photoIds: photoIds,
   });
+  audit_(s, 'ผู้เช่าแจ้งซ่อม', 'ห้อง ' + s.roomId, data.title);
+  return saved;
 }
 
 /** หน้าหลักผู้เช่า */
@@ -74,7 +78,7 @@ function apiTenantHome(token) {
     { where: [COL.PAYMENTS, { roomId: s.roomId }] },
     { where: [COL.REPAIRS, { roomId: s.roomId }] },
   ]);
-  const t = r[0].filter(function (x) { return x.tenantId === s.tenantId; })[0];
+  const t = r[0].filter(function (x) { return x.id === s.tenancyId; })[0];
   if (!t) throw new Error('AUTH: สิทธิ์การเข้าพักสิ้นสุดแล้ว');
   const invoices = sortBy_(r[1].filter(function (i) { return i.tenancyId === t.id && i.status !== 'cancelled'; }), 'month', true);
   const payments = r[2]

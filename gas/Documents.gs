@@ -57,7 +57,7 @@ function renderTemplate_(templateId, folderId, fileName, map, roomId, tableHook,
 
 /** สร้างสัญญาเช่าของการเข้าพักครั้งนั้น (เก็บทั้ง Docs ไว้แก้ไข และ PDF) */
 function apiGenerateContract(token, tenancyId) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const s = getSettings_();
   const t = fsGet_(COL.TENANCIES, tenancyId);
   if (!t) throw new Error('ไม่พบข้อมูลการเข้าพัก');
@@ -71,6 +71,7 @@ function apiGenerateContract(token, tenancyId) {
   const r = renderTemplate_(s.contractTemplateId, s.pdfFolderId,
     'สัญญาเช่า ' + t.roomId + ' ' + tenant.name, map, t.roomId, null, true);
   fsUpdate_(COL.TENANCIES, tenancyId, { contractFileId: r.pdfId, contractDocId: r.docId });
+  audit_(me, 'สร้างสัญญาเช่า', 'ห้อง ' + t.roomId, tenant.name || '');
   return { pdfId: r.pdfId, docUrl: 'https://docs.google.com/document/d/' + r.docId + '/edit' };
 }
 

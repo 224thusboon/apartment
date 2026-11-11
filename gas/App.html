@@ -320,7 +320,9 @@
               <div class="muted" style="font-size:13px;margin-top:6px">ขอ PIN ได้ที่ผู้ดูแลหอ ${PUB.phone && PUB.phone !== '-' ? '· โทร ' + esc(PUB.phone) : ''}</div>
             </div>
             <div data-for="admin" class="hidden">
-              <label>รหัสผ่านผู้ดูแล</label><input name="password" type="password" autocomplete="current-password">
+              <label>อีเมลผู้ดูแล</label><input name="email" type="text" inputmode="email" autocomplete="username" placeholder="name@example.com">
+              <label>รหัสผ่าน</label><input name="password" type="password" autocomplete="current-password">
+              <div class="muted" style="font-size:13px;margin-top:6px">ตั้งค่าครั้งแรกหรือกู้คืนระบบ: ใส่อีเมลเป็น master และใช้รหัส master</div>
             </div>
             <p style="margin-top:20px"><button type="submit" style="width:100%">เข้าสู่ระบบ ${ic('arrow')}</button></p>
           </form>
@@ -342,8 +344,10 @@
         const r = await run('apiLogin', d);
         state.token = r.token;
         state.roomId = r.roomId || '';
+        state.name = r.name || '';
+        state.master = !!r.master;
         Store.set(r.token);
-        Store.setMe({ role: r.role, roomId: state.roomId });
+        Store.setMe({ role: r.role, roomId: state.roomId, name: state.name, master: state.master });
         start(r.role);
       });
     };
@@ -361,7 +365,7 @@
     state.role = role;
     $('#logoutBtn').classList.remove('hidden');
     $('#who').classList.remove('hidden');
-    $('#who').textContent = role === 'admin' ? 'ผู้ดูแล' : 'ห้อง ' + (state.roomId || '');
+    $('#who').textContent = role === 'admin' ? (state.name || 'ผู้ดูแล') : 'ห้อง ' + (state.roomId || '');
     if (role === 'admin') {
       setTabs([
         { id: 'rooms', ico: 'home', label: 'ภาพรวม', render: adminRooms },
@@ -1042,7 +1046,9 @@
           ${s.contractTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="${docUrl(s.contractTemplateId)}">แม่แบบสัญญาเช่า</a>` : ''}
           ${s.rootFolderId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https:\/\/drive.google.com/drive/folders/${encodeURIComponent(s.rootFolderId)}">โฟลเดอร์ Drive</a>` : ''}
         </p>
-      </div>`;
+      </div>
+      <div id="sysArea"><div class="center muted">กำลังโหลดข้อมูลระบบ…</div></div>`;
+    loadSystemPanel();
     $('#setForm').onsubmit = (e) => {
       e.preventDefault();
       const f = formData(e.target);
@@ -1055,6 +1061,94 @@
         document.documentElement.style.setProperty('--accent', ns.primaryColor);
         $('#title').textContent = ns.dormName;
         toast('บันทึกแล้ว');
+      });
+    };
+  }
+
+  // ---------- ผู้ดูแลระบบ / บันทึกการทำงาน / สำรองข้อมูล ----------
+  async function loadSystemPanel(auditMonth) {
+    const box = $('#sysArea');
+    if (!box) return;
+    auditMonth = auditMonth || thisMonth();
+    let admins, logs, backups;
+    try {
+      [admins, logs, backups] = await Promise.all([api('apiListAdmins'), api('apiListAudit', auditMonth), api('apiListBackups')]);
+    } catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
+    if (!$('#sysArea')) return;
+    box.innerHTML = `
+      ${state.master ? `<div class="card alert-bad"><strong>คุณเข้าระบบด้วยรหัส master</strong>
+        <div style="font-size:14px">${admins.length ? 'ใช้รหัส master เฉพาะกรณีกู้คืนระบบ ควรออกจากระบบแล้วเข้าด้วยอีเมลของตัวเอง' : 'กรุณาเพิ่มผู้ดูแลด้วยอีเมลก่อน แล้วออกจากระบบและเข้าใหม่ด้วยอีเมลนั้น'}</div></div>` : ''}
+
+      ${sec('ผู้ดูแลระบบ', `<button type="button" class="small" id="addAdmin">${ic('plus')} เพิ่มผู้ดูแล</button>`)}
+      <div class="card">${admins.length ? admins.map((a) => `
+        <div class="list-item row spread">
+          <div class="grow"><strong>${esc(a.name)}</strong> ${a.active ? '' : '<span class="pill s-ended">ปิดใช้งาน</span>'}
+            <div class="muted" style="font-size:14px">${esc(a.email)}${a.lastLoginAt ? ' · เข้าล่าสุด ' + thDate(a.lastLoginAt) : ''}</div></div>
+          <button type="button" class="small ghost" data-editadmin="${esc(a.id)}">แก้ไข</button>
+        </div>`).join('') : '<span class="muted">ยังไม่มีผู้ดูแล (ตอนนี้ใช้ได้เฉพาะรหัส master)</span>'}</div>
+      ${state.master ? '' : `<p><button type="button" class="ghost small" id="myPw">เปลี่ยนรหัสผ่านของฉัน</button></p>`}
+
+      ${sec('สำรองข้อมูล', `<button type="button" class="small" id="backupNow">สำรองตอนนี้</button>`)}
+      <p class="muted" style="font-size:14px;margin-top:-6px">ระบบสำรองข้อมูลอัตโนมัติทุกสัปดาห์ไปที่โฟลเดอร์ "สำรองข้อมูล" ใน Drive เก็บไว้ 12 ชุดล่าสุด</p>
+      <div class="card">${backups.length ? backups.slice(0, 6).map((b) => `
+        <div class="list-item row spread"><span>${esc(b.name)}</span><span class="muted" style="font-size:13px">${thDate(b.at)} · ${fmt(b.size / 1024)} KB</span></div>`).join('') : '<span class="muted">ยังไม่มีไฟล์สำรอง</span>'}</div>
+
+      ${sec('บันทึกการทำงาน', `<input type="month" id="auditMon" value="${auditMonth}" style="width:auto">`)}
+      <div class="card scroll-x">${logs.length ? `<table style="font-size:14px">
+        <thead><tr><th>เวลา</th><th>ผู้ทำ</th><th>การทำงาน</th><th>รายละเอียด</th></tr></thead>
+        <tbody>${logs.map((l) => `<tr>
+          <td style="white-space:nowrap">${thDate(l.at)} ${new Date(l.at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</td>
+          <td>${esc(l.name)}${l.role === 'tenant' && l.roomId ? ' (ห้อง ' + esc(l.roomId) + ')' : ''}</td>
+          <td><strong>${esc(l.action)}</strong>${l.target ? '<div class="muted">' + esc(l.target) + '</div>' : ''}</td>
+          <td class="muted">${esc(l.detail)}</td></tr>`).join('')}</tbody></table>` : '<span class="muted">ไม่มีรายการในเดือนนี้</span>'}</div>`;
+
+    $('#addAdmin').onclick = () => adminForm({ active: true });
+    $$('[data-editadmin]').forEach((b) => { b.onclick = () => adminForm(admins.find((x) => x.id === b.dataset.editadmin)); });
+    $('#auditMon').onchange = (e) => e.target.value && loadSystemPanel(e.target.value);
+    $('#backupNow').onclick = (e) => busy(e.target, async () => { const n = await api('apiBackupNow'); toast('สำรองแล้ว: ' + n); loadSystemPanel(auditMonth); });
+    if ($('#myPw')) $('#myPw').onclick = () => myPasswordForm();
+  }
+
+  function adminForm(a) {
+    const b = openModal(a.id ? 'แก้ไขผู้ดูแล' : 'เพิ่มผู้ดูแล', `
+      <form id="admForm">
+        <label>ชื่อ</label><input name="name" value="${esc(a.name || '')}" placeholder="เช่น คุณแดง">
+        <label>อีเมล (ใช้ล็อกอิน) *</label><input name="email" type="email" required value="${esc(a.email || '')}">
+        <label>${a.id ? 'ตั้งรหัสผ่านใหม่ (เว้นว่างถ้าไม่เปลี่ยน)' : 'รหัสผ่านเริ่มต้น *'}</label>
+        <input name="password" type="password" minlength="8" ${a.id ? '' : 'required'} autocomplete="new-password" placeholder="อย่างน้อย 8 ตัว">
+        ${a.id ? `<label class="row" style="color:var(--text);font-weight:400"><input type="checkbox" name="active" style="width:auto" ${a.active ? 'checked' : ''}> เปิดใช้งาน</label>` : ''}
+        <p class="muted" style="font-size:13px">ปิดใช้งานหรือเปลี่ยนรหัส จะออกจากระบบทุกเครื่องของคนนั้นทันที</p>
+        <p><button type="submit">บันทึก</button></p>
+      </form>`);
+    $('#admForm', b).onsubmit = (e) => {
+      e.preventDefault();
+      const f = formData(e.target);
+      f.id = a.id || '';
+      f.active = a.id ? !!$('[name=active]', e.target).checked : true;
+      busy($('button[type=submit]', e.target), async () => {
+        await api('apiSaveAdmin', f);
+        closeModal();
+        toast('บันทึกแล้ว');
+        loadSystemPanel();
+      });
+    };
+  }
+
+  function myPasswordForm() {
+    const b = openModal('เปลี่ยนรหัสผ่านของฉัน', `
+      <form id="pwForm">
+        <label>รหัสผ่านเดิม</label><input name="old" type="password" required autocomplete="current-password">
+        <label>รหัสผ่านใหม่ (อย่างน้อย 8 ตัว)</label><input name="nw" type="password" minlength="8" required autocomplete="new-password">
+        <p class="muted" style="font-size:13px">เครื่องอื่นที่ล็อกอินไว้จะถูกออกจากระบบ</p>
+        <p><button type="submit">เปลี่ยนรหัสผ่าน</button></p>
+      </form>`);
+    $('#pwForm', b).onsubmit = (e) => {
+      e.preventDefault();
+      const f = formData(e.target);
+      busy($('button[type=submit]', e.target), async () => {
+        await api('apiChangeMyPassword', f.old, f.nw);
+        closeModal();
+        toast('เปลี่ยนรหัสผ่านแล้ว');
       });
     };
   }
@@ -1194,13 +1288,17 @@
     const me = Store.getMe();
     if (me && me.role) {
       state.roomId = me.roomId || '';
+      state.name = me.name || '';
+      state.master = !!me.master;
       return start(me.role);
     }
     try {
       const who = await run('apiWhoAmI', state.token);
       state.roomId = who.roomId || '';
+      state.name = who.name || '';
+      state.master = !!who.master;
       Store.set(state.token);
-      Store.setMe({ role: who.role, roomId: state.roomId });
+      Store.setMe({ role: who.role, roomId: state.roomId, name: state.name, master: state.master });
       start(who.role);
     } catch (e) {
       showLogin();

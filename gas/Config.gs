@@ -23,6 +23,8 @@ const COL = {
   LEDGER: 'ledger',         // บัญชีรายรับ-รายจ่ายที่บันทึกเอง
   RECEIPTS: 'receipts',     // ใบเสร็จรับเงิน (ผูกกับใบแจ้งหนี้)
   COUNTERS: 'counters',     // ตัวนับเลขที่เอกสารรายวัน เช่น inv_25691031
+  ADMINS: 'admins',         // ผู้ดูแล (อีเมล + รหัสผ่าน hash)
+  AUDIT: 'audit',           // บันทึกการทำงาน
   SESSIONS: 'sessions',
 };
 
@@ -50,6 +52,7 @@ const DEFAULT_SETTINGS = {
   slipFolderId: '',
   pdfFolderId: '',
   photoFolderId: '',
+  backupFolderId: '',
 };
 
 function prop_(key) {

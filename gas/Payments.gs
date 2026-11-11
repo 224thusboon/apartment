@@ -6,7 +6,8 @@
 function apiUploadSlip(token, invoiceId, upload, amount) {
   const s = requireSession_(token, 'tenant');
   const inv = fsGet_(COL.INVOICES, invoiceId);
-  if (!inv || inv.roomId !== s.roomId) throw new Error('ไม่พบใบแจ้งหนี้');
+  // ต้องเป็นบิลของการเข้าพักครั้งนี้เท่านั้น (กันผู้เช่าเก่าแนบสลิปให้บิลผู้เช่าใหม่)
+  if (!inv || inv.roomId !== s.roomId || inv.tenancyId !== s.tenancyId) throw new Error('ไม่พบใบแจ้งหนี้');
   if (inv.status === 'paid') throw new Error('บิลนี้ชำระแล้ว');
   const settings = getSettings_();
   const fileId = saveUpload_(settings.slipFolderId, upload, s.roomId, 'slip_' + inv.month);
@@ -16,6 +17,7 @@ function apiUploadSlip(token, invoiceId, upload, amount) {
     uploadedAt: new Date().toISOString(), status: 'pending', note: '',
   });
   fsUpdate_(COL.INVOICES, invoiceId, { status: 'pending' });
+  audit_(s, 'ผู้เช่าแนบสลิป', 'ใบแจ้งหนี้ ' + (inv.number || invoiceId) + ' ห้อง ' + s.roomId, money_(p.amount) + ' บาท');
   return p;
 }
 
@@ -28,18 +30,24 @@ function apiListPayments(token, status) {
 
 /** แอดมินตรวจสลิป */
 function apiReviewPayment(token, paymentId, approve, note) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const p = fsGet_(COL.PAYMENTS, paymentId);
   if (!p) throw new Error('ไม่พบรายการ');
-  fsUpdate_(COL.PAYMENTS, paymentId, { status: approve ? 'approved' : 'rejected', note: note || '' });
+  fsUpdate_(COL.PAYMENTS, paymentId, {
+    status: approve ? 'approved' : 'rejected', note: note || '',
+    reviewedBy: me.email || me.name || '', reviewedAt: new Date().toISOString(),
+  });
+  let rcNo = '';
   if (approve) {
     const paidAt = today_();
     fsUpdate_(COL.INVOICES, p.invoiceId, { status: 'paid', paidAt: paidAt });
     const rc = issueReceipt_(p.invoiceId, paidAt, paymentId);
-    if (rc) fsUpdate_(COL.PAYMENTS, paymentId, { receiptId: rc.id, receiptNo: rc.number });
+    if (rc) { fsUpdate_(COL.PAYMENTS, paymentId, { receiptId: rc.id, receiptNo: rc.number }); rcNo = rc.number; }
   } else {
     fsUpdate_(COL.INVOICES, p.invoiceId, { status: 'unpaid', paidAt: '' });
   }
+  audit_(me, approve ? 'อนุมัติสลิป' : 'ไม่อนุมัติสลิป', 'ห้อง ' + p.roomId + ' บิล ' + p.month,
+    money_(p.amount) + ' บาท' + (rcNo ? ' · ออกใบเสร็จ ' + rcNo : '') + (note ? ' · ' + note : ''));
   return true;
 }
 

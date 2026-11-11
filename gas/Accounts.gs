@@ -94,7 +94,7 @@ function apiAccountYear(token, year) {
 
 /** บันทึกรายการเอง  entry: {id?, type, date, category, amount, note}  file: {name,mimeType,data} (ไม่บังคับ) */
 function apiSaveEntry(token, entry, file) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   if (['income', 'expense'].indexOf(entry.type) < 0) throw new Error('ประเภทไม่ถูกต้อง');
   const amount = round2_(entry.amount);
   if (!(amount > 0)) throw new Error('กรุณาใส่จำนวนเงิน');
@@ -102,14 +102,22 @@ function apiSaveEntry(token, entry, file) {
   const old = entry.id ? fsGet_(COL.LEDGER, entry.id) : null;
   let fileId = old ? old.fileId || '' : '';
   if (file && file.data) fileId = saveUpload_(getSettings_().slipFolderId, file, 'ledger', 'receipt');
-  return fsSet_(COL.LEDGER, entry.id || null, {
+  const saved = fsSet_(COL.LEDGER, entry.id || null, {
     type: entry.type, date: date, month: date.slice(0, 7), category: entry.category || '',
     amount: amount, note: entry.note || '', fileId: fileId,
+    createdBy: old ? old.createdBy || '' : (me.email || me.name || ''),
   });
+  audit_(me, (old ? 'แก้ไข' : 'บันทึก') + (entry.type === 'income' ? 'รายรับ' : 'รายจ่าย'), entry.category || '',
+    money_(amount) + ' บาท' + (old && Number(old.amount) !== amount ? ' (เดิม ' + money_(old.amount) + ')' : '') +
+    ' · ' + date + (entry.note ? ' · ' + entry.note : ''));
+  return saved;
 }
 
 function apiDeleteEntry(token, id) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
+  const e = fsGet_(COL.LEDGER, id);
   fsDelete_(COL.LEDGER, id);
+  if (e) audit_(me, 'ลบ' + (e.type === 'income' ? 'รายรับ' : 'รายจ่าย'), e.category || '',
+    money_(e.amount) + ' บาท · ' + e.date + (e.note ? ' · ' + e.note : ''));
   return true;
 }

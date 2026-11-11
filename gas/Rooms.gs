@@ -69,13 +69,15 @@ function apiRoomDetail(token, roomId) {
 }
 
 function apiSaveRoom(token, room) {
-  requireSession_(token, 'admin');
-  return fsUpdate_(COL.ROOMS, room.id, {
+  const me = requireSession_(token, 'admin');
+  const saved = fsUpdate_(COL.ROOMS, room.id, {
     rent: Number(room.rent) || 0,
     deposit: Number(room.deposit) || 0,
     note: room.note || '',
     status: room.status,
   });
+  audit_(me, 'แก้ไขข้อมูลห้อง', 'ห้อง ' + room.id, 'ค่าเช่า ' + room.rent + ' ประกัน ' + room.deposit + ' สถานะ ' + room.status);
+  return saved;
 }
 
 /**
@@ -85,7 +87,7 @@ function apiSaveRoom(token, room) {
  * คืน PIN สำหรับให้ผู้เช่าเข้าระบบ (แสดงครั้งเดียว)
  */
 function apiMoveIn(token, data) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const room = fsGet_(COL.ROOMS, data.roomId);
   if (!room) throw new Error('ไม่พบห้อง');
   if (room.currentTenancyId) throw new Error('ห้องนี้มีผู้เช่าอยู่ กรุณาบันทึกย้ายออกก่อน');
@@ -114,30 +116,38 @@ function apiMoveIn(token, data) {
     note: '',
   });
   fsUpdate_(COL.ROOMS, room.id, { status: 'occupied', currentTenancyId: tenancy.id });
+  audit_(me, 'บันทึกย้ายเข้า', 'ห้อง ' + room.id, tenant.name + ' วันที่ ' + tenancy.moveIn);
   return { tenancyId: tenancy.id, pin: pin };
 }
 
-/** ย้ายออก: data {roomId, moveOut, note} */
+/** ย้ายออก: data {roomId, moveOut, note}  ตัดการเข้าระบบของผู้เช่าทุกเครื่องทันที */
 function apiMoveOut(token, data) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const room = fsGet_(COL.ROOMS, data.roomId);
   if (!room || !room.currentTenancyId) throw new Error('ห้องนี้ไม่มีผู้เช่า');
-  fsUpdate_(COL.TENANCIES, room.currentTenancyId, {
+  const tenancyId = room.currentTenancyId;
+  fsUpdate_(COL.TENANCIES, tenancyId, {
     moveOut: data.moveOut || today_(),
     status: 'ended',
     note: data.note || '',
     pinHash: '', // ปิดการเข้าระบบ
   });
   fsUpdate_(COL.ROOMS, room.id, { status: 'vacant', currentTenancyId: '' });
+  const n = revokeSessions_({ tenancyId: tenancyId });
+  audit_(me, 'บันทึกย้ายออก', 'ห้อง ' + room.id, (data.note || '') + ' (ตัดการเข้าระบบ ' + n + ' เครื่อง)');
   return true;
 }
 
+/** ออก PIN ใหม่: PIN เดิมใช้ไม่ได้ และเครื่องที่ล็อกอินค้างอยู่ถูกตัดออก */
 function apiResetPin(token, roomId) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const room = fsGet_(COL.ROOMS, roomId);
   if (!room || !room.currentTenancyId) throw new Error('ห้องนี้ไม่มีผู้เช่า');
   const pin = randomPin_();
   fsUpdate_(COL.TENANCIES, room.currentTenancyId, { pinHash: hash_(roomId + ':' + pin) });
+  const n = revokeSessions_({ tenancyId: room.currentTenancyId });
+  CacheService.getScriptCache().remove('lock_room_' + roomId);
+  audit_(me, 'ออก PIN ใหม่', 'ห้อง ' + roomId, 'ตัดการเข้าระบบเดิม ' + n + ' เครื่อง');
   return { pin: pin };
 }
 
@@ -147,7 +157,7 @@ function apiGetTenant(token, tenantId) {
 }
 
 function apiSaveSettings(token, s) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const allowed = ['dormName', 'dormAddress', 'ownerName', 'phone', 'bankInfo', 'primaryColor',
     'waterRate', 'waterMinCharge', 'electricRate', 'electricMinCharge', 'dueDay', 'otherFees',
     'invoiceNotes', 'invoiceFooter'];
@@ -164,5 +174,6 @@ function apiSaveSettings(token, s) {
   }
   fsUpdate_(COL.SETTINGS, 'main', upd);
   clearSettingsCache_();
+  audit_(me, 'แก้ไขการตั้งค่า', '', Object.keys(upd).join(', '));
   return getSettings_();
 }

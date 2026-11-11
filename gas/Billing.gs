@@ -56,7 +56,7 @@ function monthSheet_(month) {
 
 /** rows: [{roomId, water, electric}] */
 function apiSaveReadings(token, month, rows) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const docs = {};
   rows.forEach(function (r) {
     if (r.water === '' || r.electric === '' || r.water == null || r.electric == null) return;
@@ -65,6 +65,7 @@ function apiSaveReadings(token, month, rows) {
     };
   });
   fsSetMany_(COL.READINGS, docs);
+  audit_(me, 'บันทึกเลขมิเตอร์', 'เดือน ' + month, Object.keys(docs).length + ' ห้อง');
   return true;
 }
 
@@ -103,7 +104,7 @@ function calcInvoice_(settings, room, tenancy, prevR, curR, month, extra) {
  * คืน [{roomId, ok, total|error}]
  */
 function apiGenerateInvoices(token, month) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const settings = getSettings_();
   const ms = monthSheet_(month);
   const sheet = ms.rows;
@@ -149,6 +150,8 @@ function apiGenerateInvoices(token, month) {
       return { roomId: row.roomId, ok: false, error: String(err.message || err) };
     }
   });
+  const ok = results.filter(function (x) { return x.ok; });
+  audit_(me, 'ออกใบแจ้งหนี้', 'เดือน ' + month, ok.length + ' ห้อง: ' + ok.map(function (x) { return x.roomId; }).join(', '));
   return results;
 }
 
@@ -197,7 +200,7 @@ function apiListInvoices(token, month) {
 }
 
 function apiSetInvoiceStatus(token, invoiceId, status) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   if (['unpaid', 'pending', 'paid'].indexOf(status) < 0) throw new Error('สถานะไม่ถูกต้อง');
   const inv = fsGet_(COL.INVOICES, invoiceId);
   if (!inv) throw new Error('ไม่พบใบแจ้งหนี้');
@@ -209,8 +212,12 @@ function apiSetInvoiceStatus(token, invoiceId, status) {
     fsUpdate_(COL.INVOICES, invoiceId, { status: status, paidAt: '' });
     if (inv.receiptId) voidReceipt_(invoiceId, 'เปลี่ยนสถานะใบแจ้งหนี้เป็น ' + status);
   }
+  audit_(me, 'เปลี่ยนสถานะใบแจ้งหนี้', 'ใบแจ้งหนี้ ' + (inv.number || invoiceId) + ' ห้อง ' + inv.roomId,
+    (STATUS_TH_[inv.status] || inv.status) + ' → ' + (STATUS_TH_[status] || status) + ' · ' + money_(inv.total) + ' บาท');
   return true;
 }
+
+const STATUS_TH_ = { unpaid: 'ค้างชำระ', pending: 'รอตรวจสลิป', paid: 'ชำระแล้ว', cancelled: 'ยกเลิก' };
 
 function round2_(n) { return Math.round(Number(n) * 100) / 100; }
 
@@ -219,7 +226,7 @@ function round2_(n) { return Math.round(Number(n) * 100) / 100; }
  * data: {number, items:[{name, qty, price}]}
  */
 function apiUpdateInvoice(token, invoiceId, data) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const inv = fsGet_(COL.INVOICES, invoiceId);
   if (!inv) throw new Error('ไม่พบใบแจ้งหนี้');
   if (inv.status === 'cancelled') throw new Error('ใบนี้ยกเลิกแล้ว แก้ไขไม่ได้');
@@ -242,6 +249,9 @@ function apiUpdateInvoice(token, invoiceId, data) {
   upd.pdfFileId = renderInvoicePdf_(settings, upd);
   delete upd.id;
   fsSet_(COL.INVOICES, invoiceId, upd);
+  audit_(me, 'แก้ไขใบแจ้งหนี้', 'ใบแจ้งหนี้ ' + number + ' ห้อง ' + inv.roomId,
+    (inv.number !== number ? 'เลขที่ ' + (inv.number || '-') + ' → ' + number + ' · ' : '') +
+    'ยอด ' + money_(inv.total) + ' → ' + money_(upd.total));
   return true;
 }
 
@@ -250,7 +260,7 @@ function apiUpdateInvoice(token, invoiceId, data) {
  * ห้องนั้นออกใบใหม่ของเดือนเดียวกันได้ (ได้เลขที่ใหม่)
  */
 function apiCancelInvoice(token, invoiceId, reason) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   const inv = fsGet_(COL.INVOICES, invoiceId);
   if (!inv) throw new Error('ไม่พบใบแจ้งหนี้');
   if (inv.status === 'paid') throw new Error('ใบนี้ชำระแล้ว ถ้าจะยกเลิกให้เปลี่ยนสถานะเป็นค้างชำระก่อน');
@@ -260,6 +270,8 @@ function apiCancelInvoice(token, invoiceId, reason) {
   delete keep.id;
   fsSet_(COL.INVOICES, invoiceId + '_x' + Date.now(), keep);
   fsDelete_(COL.INVOICES, invoiceId);
+  audit_(me, 'ยกเลิกใบแจ้งหนี้', 'ใบแจ้งหนี้ ' + (inv.number || invoiceId) + ' ห้อง ' + inv.roomId,
+    money_(inv.total) + ' บาท' + (reason ? ' · เหตุผล: ' + reason : ''));
   return true;
 }
 
@@ -267,19 +279,23 @@ function apiCancelInvoice(token, invoiceId, reason) {
 
 /** data: {roomId, month, name, qty, price, note} */
 function apiAddCharge(token, data) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
   if (!data.roomId || !data.month || !String(data.name || '').trim()) throw new Error('กรุณาระบุห้อง เดือน และชื่อรายการ');
   const q = Number(data.qty) || 1, p = Number(data.price) || 0;
-  return fsSet_(COL.CHARGES, null, {
+  const c = fsSet_(COL.CHARGES, null, {
     roomId: String(data.roomId), month: data.month, name: String(data.name).trim(),
     qty: q, price: p, amount: round2_(q * p), note: data.note || '', repairId: data.repairId || '',
     createdAt: today_(),
   });
+  audit_(me, 'เพิ่มรายการเรียกเก็บ', 'ห้อง ' + c.roomId + ' บิล ' + c.month, c.name + ' ' + money_(c.amount) + ' บาท');
+  return c;
 }
 
 function apiDeleteCharge(token, chargeId) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
+  const c = fsGet_(COL.CHARGES, chargeId);
   fsDelete_(COL.CHARGES, chargeId);
+  if (c) audit_(me, 'ลบรายการเรียกเก็บ', 'ห้อง ' + c.roomId + ' บิล ' + c.month, c.name + ' ' + money_(c.amount) + ' บาท');
   return true;
 }
 
