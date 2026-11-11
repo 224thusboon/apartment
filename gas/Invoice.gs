@@ -33,8 +33,8 @@ function gFetch_(url, method, payload) {
 // ---------- สร้างแม่แบบ ----------
 
 function createInvoiceTemplate_(folder) {
-  // ความกว้างคอลัมน์ A-G (ประมาณสัดส่วนใบเดิม)
-  const widths = [60, 320, 80, 140, 95, 120, 170];
+  // ความกว้างคอลัมน์ A-G (สัดส่วนใบเดิม รวม ~700px = พอดีกระดาษ A4 ไม่ถูกย่อ)
+  const widths = [42, 228, 58, 100, 68, 86, 120];
   const R = {}; // R[row][col] = {v, bold, size, align, text}
   function put(r, c, v, f) { (R[r] = R[r] || {})[c] = Object.assign({ v: v }, f || {}); }
   const RIGHT = { align: 'RIGHT', text: true };
@@ -122,9 +122,9 @@ function createInvoiceTemplate_(folder) {
   function rowH(r1, r2, px) {
     reqs.push({ updateDimensionProperties: { range: { sheetId: 0, dimension: 'ROWS', startIndex: r1, endIndex: r2 }, properties: { pixelSize: px }, fields: 'pixelSize' } });
   }
-  rowH(0, ROWS, 24);
-  rowH(6, 9, 42);           // กล่องผู้เช่าสูงแบบใบเดิม
-  rowH(ITEM0, BODY_END, 28);
+  rowH(0, ROWS, 21);
+  rowH(6, 9, 40);           // กล่องผู้เช่าสูงแบบใบเดิม
+  rowH(ITEM0, BODY_END, 26);
   // กล่องผู้เช่า: กรอบนอก + เส้นแบ่งระหว่าง D|E
   reqs.push({ updateBorders: { range: rng(6, 9, 0, 7), top: line, bottom: line, left: line, right: line } });
   reqs.push({ updateBorders: { range: rng(6, 9, 4, 7), left: line } });
