@@ -36,6 +36,9 @@ const DEFAULT_SETTINGS = {
   electricMinCharge: 0,
   otherFees: [],         // [{name:'ค่าส่วนกลาง', amount:100}]
   dueDay: 5,             // ชำระภายในวันที่
+  invoiceNotes: '',      // ข้อความแจ้งผู้เช่าในใบแจ้งหนี้ (หลายบรรทัด)
+  invoiceFooter: '',     // หมายเหตุท้ายใบแจ้งหนี้
+  invoiceSeq: 0,         // เลขที่ใบแจ้งหนี้ล่าสุด
   invoiceTemplateId: '', // Google Docs template (setup() สร้างให้)
   contractTemplateId: '',
   rootFolderId: '',

@@ -71,13 +71,20 @@ function calcInvoice_(settings, room, tenancy, prevR, curR, month) {
   const eUnits = Math.max(0, curR.electric - prevR.electric);
   const wAmt = Math.max(wUnits * settings.waterRate, settings.waterMinCharge || 0);
   const eAmt = Math.max(eUnits * settings.electricRate, settings.electricMinCharge || 0);
+  const rent = Number(tenancy.rent || room.rent);
+  const per = monthPeriod_(month);
+  const period = ' ' + shortDate_(per.start) + ' - ' + shortDate_(per.end);
+  // qty/price ใช้แสดงในใบแจ้งหนี้ PDF, detail ใช้แสดงในแอป
   const items = [
-    { name: 'ค่าเช่าห้อง ' + thaiMonth_(month), detail: '', amount: Number(tenancy.rent || room.rent) },
-    { name: 'ค่าน้ำ', detail: prevR.water + ' → ' + curR.water + ' = ' + wUnits + ' หน่วย × ' + settings.waterRate, amount: wAmt },
-    { name: 'ค่าไฟ', detail: prevR.electric + ' → ' + curR.electric + ' = ' + eUnits + ' หน่วย × ' + settings.electricRate, amount: eAmt },
+    { name: 'ค่าห้อง' + period, qty: 1, price: rent, amount: rent, detail: '' },
+    { name: 'ค่าไฟ' + period, qty: eUnits, price: settings.electricRate, amount: eAmt,
+      detail: prevR.electric + ' → ' + curR.electric + ' = ' + eUnits + ' หน่วย × ' + settings.electricRate },
+    { name: 'ค่าน้ำ' + period, qty: wUnits, price: settings.waterRate, amount: wAmt,
+      detail: prevR.water + ' → ' + curR.water + ' = ' + wUnits + ' หน่วย × ' + settings.waterRate },
   ];
   (settings.otherFees || []).forEach(function (f) {
-    items.push({ name: f.name, detail: '', amount: Number(f.amount) || 0 });
+    const a = Number(f.amount) || 0;
+    items.push({ name: f.name, qty: 1, price: a, amount: a, detail: '' });
   });
   const total = items.reduce(function (s, i) { return s + i.amount; }, 0);
   return { items: items, total: total, waterUnits: wUnits, electricUnits: eUnits };
@@ -96,8 +103,15 @@ function apiGenerateInvoices(token, month) {
   // วันครบกำหนด = วันที่ dueDay ของเดือนถัดไป
   const dueDate = new Date(p[0], p[1], settings.dueDay);
   const dueIso = Utilities.formatDate(dueDate, 'Asia/Bangkok', 'yyyy-MM-dd');
+  const per = monthPeriod_(month);
 
-  return sheet.map(function (row) {
+  // เลขที่ใบแจ้งหนี้รันต่อเนื่อง (อ่านค่าล่าสุดจาก Firestore ตรง ๆ ไม่ใช้แคช)
+  const r = fsMulti_([{ get: [COL.SETTINGS, 'main'] }, { list: COL.TENANTS }]);
+  let seq = Number((r[0] || {}).invoiceSeq) || 0;
+  const tenants = {};
+  r[1].forEach(function (t) { tenants[t.id] = t; });
+
+  const results = sheet.map(function (row) {
     try {
       if (row.water === '' || row.electric === '') return { roomId: row.roomId, ok: false, error: 'ยังไม่จดมิเตอร์' };
       if (row.invoiceStatus === 'paid') return { roomId: row.roomId, ok: false, error: 'ชำระแล้ว ไม่ออกใหม่' };
@@ -112,11 +126,15 @@ function apiGenerateInvoices(token, month) {
       if (old && old.pdfFileId) {
         try { DriveApp.getFileById(old.pdfFileId).setTrashed(true); } catch (e) { /* ไฟล์อาจถูกลบไปแล้ว */ }
       }
+      const tenant = tenants[tenancy.tenantId] || {};
       const inv = {
         roomId: row.roomId, month: month, tenancyId: tenancy.id, tenantName: tenancy.tenantName,
+        tenantAddress: tenant.address || '',
+        number: old && old.number ? old.number : ('00' + (++seq)).slice(-3),
+        periodStart: per.start, periodEnd: per.end,
         items: calc.items, total: calc.total, dueDate: dueIso,
         status: old && old.status === 'pending' ? 'pending' : 'unpaid',
-        issuedAt: today_(), pdfFileId: '',
+        issuedAt: per.end, pdfFileId: '',
       };
       inv.pdfFileId = renderInvoicePdf_(settings, inv);
       fsSet_(COL.INVOICES, id, inv);
@@ -125,6 +143,23 @@ function apiGenerateInvoices(token, month) {
       return { roomId: row.roomId, ok: false, error: String(err.message || err) };
     }
   });
+  fsUpdate_(COL.SETTINGS, 'main', { invoiceSeq: seq });
+  clearSettingsCache_();
+  return results;
+}
+
+/** '2026-10' -> {start:'2026-10-01', end:'2026-10-31'} */
+function monthPeriod_(ym) {
+  const p = ym.split('-').map(Number);
+  const last = new Date(p[0], p[1], 0).getDate();
+  return { start: ym + '-01', end: ym + '-' + ('0' + last).slice(-2) };
+}
+
+/** '2026-10-31' -> '31/10/26' (แบบเดียวกับใบแจ้งหนี้เดิมของหอ) */
+function shortDate_(iso) {
+  if (!iso) return '';
+  const p = String(iso).slice(0, 10).split('-');
+  return Number(p[2]) + '/' + Number(p[1]) + '/' + p[0].slice(-2);
 }
 
 function apiListInvoices(token, month) {

@@ -123,7 +123,8 @@ function apiGetTenant(token, tenantId) {
 function apiSaveSettings(token, s) {
   requireSession_(token, 'admin');
   const allowed = ['dormName', 'dormAddress', 'ownerName', 'phone', 'bankInfo', 'primaryColor',
-    'waterRate', 'waterMinCharge', 'electricRate', 'electricMinCharge', 'dueDay', 'otherFees'];
+    'waterRate', 'waterMinCharge', 'electricRate', 'electricMinCharge', 'dueDay', 'otherFees',
+    'invoiceNotes', 'invoiceFooter'];
   const nums = ['waterRate', 'waterMinCharge', 'electricRate', 'electricMinCharge', 'dueDay'];
   const upd = {};
   allowed.forEach(function (k) {

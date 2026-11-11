@@ -771,6 +771,10 @@
           </div>
           <label>ค่าใช้จ่ายอื่นรายเดือน (บรรทัดละรายการ: ชื่อ=จำนวนเงิน)</label>
           <textarea name="otherFees" placeholder="ค่าส่วนกลาง=100&#10;ค่าอินเทอร์เน็ต=200">${esc((s.otherFees || []).map((f) => f.name + '=' + f.amount).join('\n'))}</textarea>
+          <label>ข้อความในใบแจ้งหนี้ (ใต้รายการ)</label>
+          <textarea name="invoiceNotes" style="min-height:120px">${esc(s.invoiceNotes)}</textarea>
+          <label>หมายเหตุท้ายใบแจ้งหนี้</label>
+          <textarea name="invoiceFooter">${esc(s.invoiceFooter)}</textarea>
           <p style="margin-top:18px"><button type="submit">บันทึกการตั้งค่า</button></p>
         </div>
       </form>
