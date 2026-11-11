@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@500;600&family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+  <?!= include('Styles'); ?>
+</head>
+<body>
+  <header id="topbar">
+    <div class="bar">
+      <div class="brand">
+        <span class="logo"><svg class="i" viewBox="0 0 24 24"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></svg></span>
+        <div style="min-width:0">
+          <div class="brand-name" id="title">…</div>
+          <div class="brand-sub">ระบบจัดการหอพัก</div>
+        </div>
+      </div>
+      <nav id="topnav" class="hidden" aria-label="เมนูหลัก"></nav>
+      <div class="bar-right">
+        <span id="who" class="chip hidden"></span>
+        <button id="logoutBtn" class="navy small hidden" type="button">ออกจากระบบ</button>
+      </div>
+    </div>
+  </header>
+
+  <main id="view"><div class="center muted">กำลังโหลด…</div></main>
+
+  <nav id="tabs" class="hidden" aria-label="เมนูหลัก"></nav>
+
+  <div id="modal" class="hidden" role="dialog" aria-modal="true">
+    <div class="sheet">
+      <div class="sheet-head">
+        <strong id="modalTitle"></strong>
+        <button type="button" class="ghost small" data-close>ปิด</button>
+      </div>
+      <div id="modalBody"></div>
+    </div>
+  </div>
+
+  <div id="toast" class="hidden"></div>
+
+  <script>window.PUB = <?!= pub ?>;</script>
+  <?!= include('App'); ?>
+</body>
+</html>

@@ -1,0 +1,68 @@
+/**
+ * ค่าคงที่ของระบบ + การอ่าน/เขียนค่าตั้งค่า
+ *
+ * Script Properties ที่ต้องตั้ง (Project Settings > Script properties):
+ *   FIRESTORE_PROJECT_ID  = รหัสโปรเจกต์ Google Cloud ที่เปิด Firestore ไว้
+ *   ADMIN_PASSWORD        = รหัสผ่านแอดมิน (setup() จะสร้างให้ถ้ายังไม่มี)
+ *   SHELL_ORIGIN          = https://<username>.github.io  (origin ของหน้า PWA)
+ *
+ * ค่าอื่น ๆ (เรทค่าน้ำ/ไฟ ชื่อหอ สี ฯลฯ) อยู่ใน Firestore: settings/main
+ * แก้ได้จากหน้า "ตั้งค่า" ในแอป
+ */
+
+const COL = {
+  SETTINGS: 'settings',
+  ROOMS: 'rooms',
+  TENANTS: 'tenants',
+  TENANCIES: 'tenancies',   // การเข้าพัก 1 ครั้ง = 1 เอกสาร (ย้ายเข้า/ย้ายออก)
+  READINGS: 'readings',     // เลขมิเตอร์รายเดือน id = {roomId}_{YYYY-MM}
+  INVOICES: 'invoices',     // id = {roomId}_{YYYY-MM}
+  PAYMENTS: 'payments',     // สลิปที่ผู้เช่าอัปโหลด
+  REPAIRS: 'repairs',
+  SESSIONS: 'sessions',
+};
+
+/** ค่าเริ่มต้น (ค่าสมมติ) — แก้จริงในหน้าตั้งค่า */
+const DEFAULT_SETTINGS = {
+  dormName: 'หอพักตัวอย่าง',
+  dormAddress: 'ที่อยู่หอพัก (แก้ในหน้าตั้งค่า)',
+  ownerName: 'ชื่อผู้ให้เช่า',
+  phone: '-',
+  bankInfo: 'ธนาคาร ... เลขบัญชี ... ชื่อบัญชี ...',
+  primaryColor: '#1aa98f', // สีเน้น (teal) — พื้นหลักเป็นสีกรมท่า
+  waterRate: 18,         // บาท/หน่วย
+  waterMinCharge: 100,   // ค่าน้ำขั้นต่ำ/เดือน
+  electricRate: 8,       // บาท/หน่วย
+  electricMinCharge: 0,
+  otherFees: [],         // [{name:'ค่าส่วนกลาง', amount:100}]
+  dueDay: 5,             // ชำระภายในวันที่
+  invoiceTemplateId: '', // Google Docs template (setup() สร้างให้)
+  contractTemplateId: '',
+  rootFolderId: '',
+  slipFolderId: '',
+  pdfFolderId: '',
+  photoFolderId: '',
+};
+
+function prop_(key) {
+  return PropertiesService.getScriptProperties().getProperty(key);
+}
+
+function getSettings_() {
+  const s = fsGet_(COL.SETTINGS, 'main');
+  return Object.assign({}, DEFAULT_SETTINGS, s || {});
+}
+
+/** ส่วนที่ผู้เช่า/หน้า login เห็นได้ (ไม่มี id ภายใน) */
+function publicSettings_(s) {
+  return {
+    dormName: s.dormName,
+    primaryColor: s.primaryColor,
+    phone: s.phone,
+    bankInfo: s.bankInfo,
+    dueDay: s.dueDay,
+    // origin ของหน้า PWA บน GitHub Pages เช่น https://username.github.io
+    // ใช้ส่ง token ไปเก็บสำรองที่หน้า shell (ส่งเฉพาะ origin นี้เท่านั้น)
+    shellOrigin: prop_('SHELL_ORIGIN') || '',
+  };
+}

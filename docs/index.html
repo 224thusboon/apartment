@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>หอพัก</title>
+  <meta name="theme-color" content="#0b1f3a">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="หอพัก">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Prompt:wght@500;600&family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+  <script src="config.js"></script>
+  <style>
+    :root { --primary: #1aa98f; --navy-900: #0b1f3a; --navy-700: #183a66;
+      --bg: #f3f6f9; --card: #fff; --text: #0f1d33; --muted: #64748b; --line: #e3e9f0; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { --bg: #08131f; --card: #0f1e33; --text: #e6edf6; --muted: #94a3b8; --line: #1d3150; }
+    }
+    :root[data-theme="dark"] { --bg: #08131f; --card: #0f1e33; --text: #e6edf6; --muted: #94a3b8; --line: #1d3150; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+      font-family: 'Sarabun', system-ui, sans-serif; line-height: 1.55; }
+    .hidden { display: none !important; }
+
+    /* โหมดแอป: iframe เต็มจอ */
+    #app { position: fixed; inset: 0; padding-top: env(safe-area-inset-top, 0px); background: var(--navy-900); }
+    #app iframe { width: 100%; height: 100%; border: 0; display: block; background: var(--bg); }
+
+    /* หน้าบังคับติดตั้ง */
+    #gate { position: relative; min-height: 100%; display: flex; flex-direction: column; align-items: center;
+      padding: 0 16px calc(32px + env(safe-area-inset-bottom, 0px)); }
+    #gate::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 330px; z-index: 0;
+      background:
+        radial-gradient(500px 260px at 95% 0%, color-mix(in srgb, var(--primary) 50%, transparent), transparent 60%),
+        radial-gradient(420px 220px at 0% 100%, rgba(56,120,200,.35), transparent 60%),
+        linear-gradient(135deg, var(--navy-900), var(--navy-700));
+      border-radius: 0 0 32px 32px; }
+    .wrap { width: 100%; max-width: 440px; position: relative; z-index: 1; }
+    .brand { text-align: center; color: #fff; padding: calc(36px + env(safe-area-inset-top, 0px)) 8px 26px; }
+    .brand img { width: 84px; height: 84px; border-radius: 22px; box-shadow: 0 10px 30px rgba(0,0,0,.3); }
+    .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; margin-top: 14px;
+      padding: 4px 12px; border-radius: 999px; background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.18); }
+    .eyebrow::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); }
+    .brand h1 { font-family: 'Prompt', sans-serif; font-weight: 600; font-size: 26px; margin: 10px 0 4px; }
+    .brand h1 span { color: color-mix(in srgb, var(--primary) 75%, #fff); }
+    .brand p { color: rgba(255,255,255,.75); margin: 0; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 20px; margin-bottom: 14px;
+      box-shadow: 0 1px 2px rgba(15,29,51,.04), 0 12px 30px rgba(15,29,51,.10); }
+    .card h2 { font-family: 'Prompt', sans-serif; font-weight: 600; font-size: 19px; margin: 0 0 12px; }
+    .card h2::before { content: ''; display: block; width: 28px; height: 3px; border-radius: 3px; background: var(--primary); margin-bottom: 10px; }
+    ol { list-style: none; counter-reset: s; padding: 0; }
+    ol li { counter-increment: s; position: relative; padding-left: 40px; min-height: 28px; }
+    ol li::before { content: counter(s); position: absolute; left: 0; top: -1px; width: 28px; height: 28px; border-radius: 50%;
+      display: grid; place-items: center; background: var(--primary); color: #fff; font-weight: 700; font-size: 14px; }
+    .perks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; }
+    .perks div { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 6px; text-align: center; font-size: 13px; font-weight: 600; }
+    .perks svg { width: 22px; height: 22px; stroke: var(--primary); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; display: block; margin: 0 auto 4px; }
+    ol { padding-left: 22px; margin: 0; }
+    ol li { margin-bottom: 10px; }
+    .key { display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border: 1px solid var(--line);
+      border-radius: 8px; background: var(--bg); font-weight: 600; white-space: nowrap; }
+    .key svg { width: 16px; height: 16px; }
+    button { width: 100%; font: inherit; font-size: 18px; font-weight: 700; padding: 14px; border: 0;
+      border-radius: 999px; background: var(--primary); color: #fff; cursor: pointer;
+      box-shadow: 0 8px 20px color-mix(in srgb, var(--primary) 35%, transparent); }
+    .skip { display: block; text-align: center; margin-top: 18px; color: var(--muted); font-size: 14px; }
+    .arrow { position: fixed; bottom: 8px; left: 50%; transform: translateX(-50%); font-size: 36px;
+      animation: bob 1.2s ease-in-out infinite; color: var(--primary); }
+    @keyframes bob { 50% { transform: translate(-50%, 8px); } }
+    @media (prefers-reduced-motion: reduce) { .arrow { animation: none; } }
+  </style>
+</head>
+<body>
+  <div id="app" class="hidden"></div>
+
+  <div id="gate" class="hidden">
+    <div class="wrap">
+      <div class="brand">
+        <img src="icons/icon-192.png" alt="">
+        <div><span class="eyebrow" id="dormName">หอพัก</span></div>
+        <h1>ติดตั้งแอป<span>ก่อนใช้งาน</span></h1>
+        <p>ใช้งานง่าย เปิดเร็ว เหมือนแอปทั่วไป</p>
+      </div>
+
+      <div class="perks" aria-hidden="true">
+        <div><svg viewBox="0 0 24 24"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>ดูบิลออนไลน์</div>
+        <div><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/></svg>แนบสลิป</div>
+        <div><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3a1.8 1.8 0 0 0 2.5 2.5l5.8-5.8a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.3-.3-2.4z"/></svg>แจ้งซ่อม</div>
+      </div>
+
+      <!-- Android / Chrome / Edge: ปุ่มติดตั้ง -->
+      <div class="card hidden" id="g-android">
+        <h2>ติดตั้งลงมือถือ Android</h2>
+        <button type="button" id="installBtn">📲 ติดตั้งลงเครื่อง</button>
+        <p style="color:var(--muted);font-size:14px;margin:10px 0 0">ถ้ากดแล้วไม่ขึ้น ให้กดเมนู <span class="key">⋮</span> มุมขวาบน แล้วเลือก <b>ติดตั้งแอป</b> หรือ <b>เพิ่มลงในหน้าจอหลัก</b></p>
+      </div>
+
+      <!-- Android ที่ยังไม่มี prompt -->
+      <div class="card hidden" id="g-android-manual">
+        <h2>วิธีติดตั้งบนมือถือ Android</h2>
+        <ol>
+          <li>กดเมนู <span class="key">⋮</span> มุมขวาบนของ Chrome</li>
+          <li>เลือก <b>ติดตั้งแอป</b> หรือ <b>เพิ่มลงในหน้าจอหลัก</b></li>
+          <li>เปิดแอปจากไอคอนบนหน้าจอ</li>
+        </ol>
+      </div>
+
+      <!-- iPhone / iPad -->
+      <div class="card hidden" id="g-ios">
+        <h2>วิธีติดตั้งบน iPhone / iPad</h2>
+        <ol>
+          <li>กดปุ่ม <span class="key">แชร์
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3v12M7 8l5-5 5 5"/><path d="M5 12v8h14v-8"/></svg></span>
+            ที่แถบด้านล่าง (หรือด้านบนบน iPad)</li>
+          <li>เลื่อนลงแล้วเลือก <span class="key">เพิ่มไปยังหน้าจอโฮม ＋</span></li>
+          <li>กด <b>เพิ่ม</b> มุมขวาบน</li>
+          <li>เปิดแอปจากไอคอน <b id="iosName">หอพัก</b> บนหน้าจอโฮม</li>
+        </ol>
+      </div>
+
+      <!-- iOS แต่ไม่ใช่ Safari -->
+      <div class="card hidden" id="g-ios-other">
+        <h2>กรุณาเปิดใน Safari</h2>
+        <p>บน iPhone ต้องติดตั้งผ่าน Safari ก่อน: คัดลอกลิงก์นี้แล้ววางในแอป Safari</p>
+        <button type="button" id="copyBtn">คัดลอกลิงก์</button>
+      </div>
+
+      <!-- เปิดจากในแอปแชท (Facebook, IG ฯลฯ) -->
+      <div class="card hidden" id="g-inapp">
+        <h2>เปิดในเบราว์เซอร์</h2>
+        <p>กดเมนู <span class="key">⋯</span> แล้วเลือก <b>เปิดในเบราว์เซอร์</b> (Safari หรือ Chrome) เพื่อติดตั้งแอป</p>
+      </div>
+
+      <!-- คอมพิวเตอร์ -->
+      <div class="card hidden" id="g-desktop">
+        <h2>ใช้งานบนคอมพิวเตอร์</h2>
+        <p>สำหรับผู้ดูแลหอ ใช้งานในเบราว์เซอร์ได้เลย หรือกดไอคอนติดตั้งที่ช่องที่อยู่ของ Chrome/Edge</p>
+        <button type="button" id="desktopGo">เข้าสู่ระบบ</button>
+      </div>
+
+      <a href="#" class="skip" id="skipLink">ใช้งานในเบราว์เซอร์ไปก่อน</a>
+    </div>
+    <div class="arrow hidden" id="iosArrow" aria-hidden="true">⬇</div>
+  </div>
+
+  <script>
+  (function () {
+    var C = window.DORM_CONFIG || {};
+    var ua = navigator.userAgent;
+    var $ = function (id) { return document.getElementById(id); };
+    var show = function (id) { $(id).classList.remove('hidden'); };
+
+    if (C.COLOR) {
+      document.documentElement.style.setProperty('--primary', C.COLOR);
+    }
+    if (C.NAME) { document.title = C.NAME; $('dormName').textContent = C.NAME; $('iosName').textContent = C.NAME; }
+
+    // ---------- เก็บ token สำรองให้ iframe ของ Apps Script ----------
+    // รับเฉพาะข้อความจากโดเมนของ Apps Script
+    var OK_ORIGIN = /^https:\/\/[a-z0-9-]+(\.[a-z0-9-]+)*\.googleusercontent\.com$/;
+    window.addEventListener('message', function (e) {
+      if (!OK_ORIGIN.test(e.origin) || !e.data) return;
+      try {
+        if (e.data.type === 'dorm-token') {
+          if (e.data.token) localStorage.setItem('dormToken', e.data.token);
+          else localStorage.removeItem('dormToken');
+        } else if (e.data.type === 'dorm-ready') {
+          e.source.postMessage({ type: 'dorm-token-reply', token: localStorage.getItem('dormToken') || '' }, e.origin);
+        }
+      } catch (err) { /* storage ถูกปิด */ }
+    });
+
+    function openApp() {
+      $('gate').classList.add('hidden');
+      show('app');
+      if (!$('app').firstChild) {
+        var f = document.createElement('iframe');
+        f.src = C.GAS_URL;
+        f.title = C.NAME || 'หอพัก';
+        f.allow = 'camera; clipboard-write';
+        $('app').appendChild(f);
+      }
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('sw.js').catch(function () {});
+    }
+
+    var standalone = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+    var skipped = false;
+    try { skipped = sessionStorage.getItem('dormSkip') === '1'; } catch (e) {}
+    if (standalone || skipped) return openApp();
+
+    // ---------- ตรวจอุปกรณ์ ----------
+    var isIOS = /iPad|iPhone|iPod/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    var isAndroid = /Android/i.test(ua);
+    var isLine = /\bLine\//i.test(ua);
+    var isInApp = /FBAN|FBAV|Instagram|Messenger|TikTok|MicroMessenger/i.test(ua);
+    var isIOSSafari = isIOS && /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
+
+    // LINE เปิดเบราว์เซอร์ภายนอกได้ด้วยพารามิเตอร์นี้
+    if (isLine && !/openExternalBrowser=1/.test(location.search)) {
+      location.replace(location.pathname + (location.search ? location.search + '&' : '?') + 'openExternalBrowser=1');
+      return;
+    }
+
+    show('gate');
+    if (isInApp) show('g-inapp');
+    else if (isIOS && isIOSSafari) { show('g-ios'); if (/iPhone|iPod/.test(ua)) show('iosArrow'); }
+    else if (isIOS) show('g-ios-other');
+    else if (isAndroid) show('g-android-manual');
+    else show('g-desktop');
+
+    var deferred = null;
+    window.addEventListener('beforeinstallprompt', function (e) {
+      e.preventDefault();
+      deferred = e;
+      $('g-android-manual').classList.add('hidden');
+      if (isAndroid) show('g-android');
+    });
+    $('installBtn').onclick = function () {
+      if (!deferred) return;
+      deferred.prompt();
+      deferred.userChoice.then(function () { deferred = null; });
+    };
+    window.addEventListener('appinstalled', function () {
+      $('installBtn').textContent = '✅ ติดตั้งแล้ว — เปิดจากไอคอนบนหน้าจอ';
+      $('installBtn').disabled = true;
+    });
+
+    $('copyBtn').onclick = function () {
+      var url = location.origin + location.pathname;
+      (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
+        .then(function () { $('copyBtn').textContent = '✅ คัดลอกแล้ว'; })
+        .catch(function () { prompt('คัดลอกลิงก์นี้', url); });
+    };
+    $('desktopGo').onclick = openApp;
+    $('skipLink').onclick = function (e) {
+      e.preventDefault();
+      try { sessionStorage.setItem('dormSkip', '1'); } catch (err) {}
+      openApp();
+    };
+  })();
+  </script>
+</body>
+</html>
