@@ -164,6 +164,44 @@
   }
   const readFiles = (input) => Promise.all(Array.from(input.files || []).map(readFile));
 
+  // PDF แสดงใน iframe ไม่ได้ (Chrome/มือถือบล็อกใน sandbox ของ Apps Script) จึงวาดเองด้วย PDF.js
+  const PDFJS = 'https:\/\/cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';
+  let pdfjsReady = null;
+  function loadPdfJs() {
+    if (!pdfjsReady) {
+      pdfjsReady = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = PDFJS + 'pdf.min.js';
+        s.onload = () => {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS + 'pdf.worker.min.js';
+          resolve(window.pdfjsLib);
+        };
+        s.onerror = () => { pdfjsReady = null; reject(new Error('โหลดตัวแสดง PDF ไม่ได้ ลองใหม่อีกครั้ง')); };
+        document.head.appendChild(s);
+      });
+    }
+    return pdfjsReady;
+  }
+
+  async function renderPdf(bytes, box) {
+    const lib = await loadPdfJs();
+    const pdf = await lib.getDocument({ data: bytes, cMapUrl: PDFJS + 'cmaps/', cMapPacked: true }).promise;
+    box.innerHTML = '';
+    const width = box.clientWidth || 600;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      const base = page.getViewport({ scale: 1 });
+      const vp = page.getViewport({ scale: (width / base.width) * ratio });
+      const c = document.createElement('canvas');
+      c.width = Math.floor(vp.width);
+      c.height = Math.floor(vp.height);
+      c.style.width = '100%';
+      box.appendChild(c);
+      await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+    }
+  }
+
   async function viewFile(fileId, title) {
     const body = openModal(title || 'ไฟล์', '<div class="center muted">กำลังโหลดไฟล์…</div>');
     try {
@@ -173,8 +211,13 @@
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
       const url = URL.createObjectURL(new Blob([bytes], { type: f.mimeType }));
       const isImg = f.mimeType.indexOf('image/') === 0;
-      body.innerHTML = `<div class="viewer">${isImg ? `<img src="${url}" alt="">` : `<iframe src="${url}" title="${esc(f.name)}"></iframe>`}</div>
+      const isPdf = f.mimeType === 'application/pdf';
+      body.innerHTML = `<div class="viewer">${isImg ? `<img src="${url}" alt="">` : isPdf ? '<div class="pdf-pages"><div class="center muted">กำลังแสดง PDF…</div></div>' : ''}</div>
         <p><a class="btn ghost" href="${url}" download="${esc(f.name)}">ดาวน์โหลด ${esc(f.name)}</a></p>`;
+      if (isPdf) {
+        const box = $('.pdf-pages', body);
+        try { await renderPdf(bytes.slice(), box); } catch (err) { box.innerHTML = `<p class="muted">แสดง PDF ไม่ได้ (${esc(err.message)}) กดดาวน์โหลดเพื่อเปิดดูแทน</p>`; }
+      }
     } catch (e) { body.innerHTML = `<p class="muted">${esc(e.message)}</p>`; }
   }
   document.addEventListener('click', (e) => {
