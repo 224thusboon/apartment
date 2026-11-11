@@ -38,16 +38,7 @@ function apiSaveRepair(token, repair, photos) {
     fsUpdate_(COL.REPAIRS, saved.id, { chargeId: c.id });
     saved.chargeId = c.id;
   }
-  // บันทึกเป็นรายจ่ายของหอ
-  if (repair.addExpense && cost > 0 && !saved.expenseId) {
-    const e = fsSet_(COL.LEDGER, null, {
-      type: 'expense', date: date, month: date.slice(0, 7), category: 'ค่าซ่อม/อะไหล่',
-      amount: cost, note: 'ห้อง ' + repair.roomId + ' ' + (repair.title || '') + (repair.parts ? ' (' + repair.parts + ')' : ''),
-      fileId: '', repairId: saved.id,
-    });
-    fsUpdate_(COL.REPAIRS, saved.id, { expenseId: e.id });
-    saved.expenseId = e.id;
-  }
+  // ค่าใช้จ่ายงานซ่อมเข้าบัญชีรายจ่ายอัตโนมัติ (ดู Accounts.gs) ไม่ต้องบันทึกซ้ำ
   return saved;
 }
 

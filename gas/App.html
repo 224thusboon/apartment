@@ -849,8 +849,7 @@
           <div><label>ค่าใช้จ่าย (บาท)</label><input name="cost" type="number" step="any" value="${esc(r.cost || '')}"></div>
           <div><label>สถานะ</label><select name="status">${['reported', 'in_progress', 'done'].map((s) => `<option value="${s}" ${(r.status || 'done') === s ? 'selected' : ''}>${STATUS[s]}</option>`).join('')}</select></div>
         </div>
-        ${r.expenseId ? '<p class="muted" style="font-size:14px">บันทึกเป็นรายจ่ายแล้ว</p>' : `
-        <label class="row" style="color:var(--text);font-weight:400"><input type="checkbox" name="addExpense" style="width:auto"> บันทึกค่าใช้จ่ายนี้เป็นรายจ่ายของหอ</label>`}
+        <p class="muted" style="font-size:13px;margin:6px 0 0">ค่าใช้จ่ายงานซ่อมจะเข้าบัญชีเป็นรายจ่ายอัตโนมัติ</p>
         ${r.chargeId ? '<p class="muted" style="font-size:14px">เรียกเก็บจากผู้เช่าแล้ว (ดูที่หน้าบิล)</p>' : `
         <label class="row" style="color:var(--text);font-weight:400"><input type="checkbox" name="chargeTenant" id="chkCharge" style="width:auto"> เรียกเก็บจากผู้เช่า (ผู้เช่าทำเสียหาย)</label>
         <div class="grid2 hidden" id="chargeBox">
@@ -867,7 +866,6 @@
       const f = formData(e.target);
       delete f.photos;
       f.id = r.id || '';
-      f.addExpense = !!f.addExpense;
       f.chargeTenant = !!f.chargeTenant;
       busy($('button[type=submit]', e.target), async () => {
         const photos = await readFiles($('[name=photos]', e.target));
@@ -918,25 +916,23 @@
         </table></div>
       </div>
 
-      <h3>รายการบันทึก ${thMonth(month)}</h3>
+      <h3>รายการรายรับ-รายจ่าย ${thMonth(month)}</h3>
+      <p class="muted" style="font-size:13px;margin:-4px 0 8px">ค่าเช่าเข้ามาเองเมื่อยืนยันการโอน · ค่าซ่อมเข้ามาเองจากงานซ่อม · รายการอื่นกดปุ่มรายรับ/รายจ่ายด้านบน</p>
       <div class="card">${d.entries.length ? d.entries.map((e) => `
         <div class="list-item row spread">
           <div class="grow"><strong class="${e.type === 'income' ? 'money-in' : 'money-out'}">${e.type === 'income' ? '+' : '−'}${fmt(e.amount)}</strong> ${esc(e.category)}
+            <span class="pill ${e.source === 'manual' ? 's-ended' : 's-occupied'}" style="margin-left:4px">${e.source === 'invoice' ? 'จากใบแจ้งหนี้' : e.source === 'repair' ? 'จากงานซ่อม' : 'บันทึกเอง'}</span>
             <div class="muted" style="font-size:14px">${thDate(e.date)}${e.note ? ' · ' + esc(e.note) : ''}</div></div>
           <div class="row">
             ${e.fileId ? `<button type="button" class="small ghost" data-file="${esc(e.fileId)}" data-title="ใบเสร็จ">ใบเสร็จ</button>` : ''}
-            <button type="button" class="small ghost" data-editent="${esc(e.id)}">แก้ไข</button>
-            <button type="button" class="small ghost" data-delent="${esc(e.id)}">ลบ</button>
+            ${e.source === 'manual' ? `<button type="button" class="small ghost" data-editent="${esc(e.id)}">แก้ไข</button>
+            <button type="button" class="small ghost" data-delent="${esc(e.id)}">ลบ</button>` : ''}
           </div>
         </div>`).join('') : '<span class="muted">ยังไม่มีรายการ</span>'}</div>
 
-      <h3>ค่าเช่าที่ได้รับ ${thMonth(month)}</h3>
-      <div class="card">${d.paidInvoices.length ? d.paidInvoices.map((i) => `
-        <div class="list-item row spread"><span>ห้อง ${esc(i.roomId)} · เลขที่ ${esc(i.number || '-')}${i.paidAt ? ' · ชำระ ' + thDate(i.paidAt) : ''}</span><strong class="money-in">${fmt(i.total)}</strong></div>`).join('') : '<span class="muted">ยังไม่มี</span>'}</div>
-
-      ${d.unpaidInvoices.length ? `<h3>ค้างชำระ</h3>
+      ${d.unpaidInvoices.length ? `<h3>ค้างรับ (ยังไม่ยืนยันการโอน)</h3>
       <div class="card">${d.unpaidInvoices.map((i) => `
-        <div class="list-item row spread"><span>ห้อง ${esc(i.roomId)} · เลขที่ ${esc(i.number || '-')} ${pill(i.status)}</span><strong>${fmt(i.total)}</strong></div>`).join('')}</div>` : ''}`;
+        <div class="list-item row spread"><span>ห้อง ${esc(i.roomId)} · บิล ${thMonth(i.month)} · เลขที่ ${esc(i.number || '-')} ${pill(i.status)}</span><strong>${fmt(i.total)}</strong></div>`).join('')}</div>` : ''}`;
 
     $('#accMon').onchange = (e) => { if (e.target.value) { $('#view').innerHTML = '<div class="center muted">กำลังโหลด…</div>'; adminAccounts(e.target.value).catch(fail); } };
     $('#addIn').onclick = () => entryForm({ type: 'income', date: month === thisMonth() ? today() : month + '-01' }, d.categories, month);
