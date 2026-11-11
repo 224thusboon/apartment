@@ -82,21 +82,14 @@
     <div class="wrap">
       <div class="brand">
         <img src="icons/icon-192.png" alt="">
-        <div><span class="eyebrow" id="dormName">หอพัก</span></div>
-        <h1>ติดตั้งแอป<span>ก่อนใช้งาน</span></h1>
-        <p>ใช้งานง่าย เปิดเร็ว เหมือนแอปทั่วไป</p>
-      </div>
-
-      <div class="perks" aria-hidden="true">
-        <div><svg viewBox="0 0 24 24"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 7h6M9 11h6M9 15h4"/></svg>ดูบิลออนไลน์</div>
-        <div><svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/></svg>แนบสลิป</div>
-        <div><svg viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3.5 17.3a1.8 1.8 0 0 0 2.5 2.5l5.8-5.8a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.4-.3-.3-2.4z"/></svg>แจ้งซ่อม</div>
+        <h1 id="dormName">หอพัก</h1>
+        <p>ติดตั้งแอปลงมือถือก่อนใช้งาน แล้วเปิดจากไอคอนบนหน้าจอ</p>
       </div>
 
       <!-- Android / Chrome / Edge: ปุ่มติดตั้ง -->
       <div class="card hidden" id="g-android">
         <h2>ติดตั้งลงมือถือ Android</h2>
-        <button type="button" id="installBtn">📲 ติดตั้งลงเครื่อง</button>
+        <button type="button" id="installBtn">ติดตั้งลงเครื่อง</button>
         <p style="color:var(--muted);font-size:14px;margin:10px 0 0">ถ้ากดแล้วไม่ขึ้น ให้กดเมนู <span class="key">⋮</span> มุมขวาบน แล้วเลือก <b>ติดตั้งแอป</b> หรือ <b>เพิ่มลงในหน้าจอหลัก</b></p>
       </div>
 
@@ -139,13 +132,12 @@
       <!-- คอมพิวเตอร์ -->
       <div class="card hidden" id="g-desktop">
         <h2>ใช้งานบนคอมพิวเตอร์</h2>
-        <p>สำหรับผู้ดูแลหอ ใช้งานในเบราว์เซอร์ได้เลย หรือกดไอคอนติดตั้งที่ช่องที่อยู่ของ Chrome/Edge</p>
+        <p>ผู้ดูแลหอใช้งานในเบราว์เซอร์ได้</p>
         <button type="button" id="desktopGo">เข้าสู่ระบบ</button>
       </div>
 
       <a href="#" class="skip" id="skipLink">ใช้งานในเบราว์เซอร์ไปก่อน</a>
     </div>
-    <div class="arrow hidden" id="iosArrow" aria-hidden="true">⬇</div>
   </div>
 
   <script>
@@ -211,7 +203,7 @@
 
     show('gate');
     if (isInApp) show('g-inapp');
-    else if (isIOS && isIOSSafari) { show('g-ios'); if (/iPhone|iPod/.test(ua)) show('iosArrow'); }
+    else if (isIOS && isIOSSafari) show('g-ios');
     else if (isIOS) show('g-ios-other');
     else if (isAndroid) show('g-android-manual');
     else show('g-desktop');
@@ -229,14 +221,14 @@
       deferred.userChoice.then(function () { deferred = null; });
     };
     window.addEventListener('appinstalled', function () {
-      $('installBtn').textContent = '✅ ติดตั้งแล้ว — เปิดจากไอคอนบนหน้าจอ';
+      $('installBtn').textContent = 'ติดตั้งแล้ว เปิดจากไอคอนบนหน้าจอ';
       $('installBtn').disabled = true;
     });
 
     $('copyBtn').onclick = function () {
       var url = location.origin + location.pathname;
       (navigator.clipboard ? navigator.clipboard.writeText(url) : Promise.reject())
-        .then(function () { $('copyBtn').textContent = '✅ คัดลอกแล้ว'; })
+        .then(function () { $('copyBtn').textContent = 'คัดลอกแล้ว'; })
         .catch(function () { prompt('คัดลอกลิงก์นี้', url); });
     };
     $('desktopGo').onclick = openApp;

@@ -46,7 +46,7 @@
     upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/>',
   };
   const ic = (name) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
-  const sec = (kicker, title, right) => `<div class="sec"><div><div class="kicker">${kicker}</div><h2>${title}</h2></div>${right ? `<div class="row">${right}</div>` : ''}</div>`;
+  const sec = (title, right) => `<div class="sec"><h2>${title}</h2>${right ? `<div class="row">${right}</div>` : ''}</div>`;
   const initial = (name) => esc(String(name || '?').replace(/^(นาย|นางสาว|นาง|น\.ส\.)\s*/, '').trim().charAt(0) || '?');
 
   const PUB = window.PUB || {};
@@ -218,25 +218,22 @@
     $('#view').innerHTML = `
       <div class="auth">
         <section class="hero">
-          <span class="eyebrow">ยินดีต้อนรับสู่ ${esc(PUB.dormName || 'หอพัก')}</span>
-          <h1>อยู่สบาย จัดการง่าย<br><span class="accent">ครบในแอปเดียว</span></h1>
-          <p>ดูบิลค่าเช่า ค่าน้ำ ค่าไฟ แนบสลิป และแจ้งซ่อมได้ทุกที่ ทุกเวลา</p>
+          <h1>${esc(PUB.dormName || 'หอพัก')}</h1>
+          <p>ผู้เช่าใช้ดูบิล ส่งสลิป และแจ้งซ่อม</p>
           <div class="feat">
-            <div><span class="ic">${ic('bill')}</span>ใบแจ้งหนี้ออนไลน์ทุกสิ้นเดือน</div>
-            <div><span class="ic">${ic('upload')}</span>แนบสลิปโอนเงินได้ทันที</div>
-            <div><span class="ic">${ic('wrench')}</span>แจ้งซ่อมพร้อมรูป ติดตามสถานะได้</div>
+            <div><span class="ic">${ic('bill')}</span>ใบแจ้งค่าเช่า ค่าน้ำ ค่าไฟ รายเดือน</div>
+            <div><span class="ic">${ic('upload')}</span>ส่งสลิปโอนเงิน</div>
+            <div><span class="ic">${ic('wrench')}</span>แจ้งซ่อม</div>
           </div>
         </section>
         <section class="card auth-form">
-          <div class="kicker">เข้าสู่ระบบ</div>
-          <h2>สวัสดีครับ 👋</h2>
-          <div class="muted">กรอกข้อมูลเพื่อเข้าใช้งาน</div>
+          <h2>เข้าสู่ระบบ</h2>
           <div class="seg"><button type="button" class="on" data-mode="tenant">ผู้เช่า</button><button type="button" data-mode="admin">ผู้ดูแลหอ</button></div>
           <form id="loginForm" autocomplete="on">
             <div data-for="tenant">
               <label>เลขห้อง</label><input name="roomId" inputmode="numeric" autocomplete="username" placeholder="เช่น 101">
               <label>PIN 6 หลัก</label><input name="pin" type="password" inputmode="numeric" maxlength="6" autocomplete="current-password" placeholder="••••••">
-              <div class="muted" style="font-size:13px;margin-top:6px">ยังไม่มี PIN? ขอได้จากผู้ดูแลหอ ${PUB.phone && PUB.phone !== '-' ? '· โทร ' + esc(PUB.phone) : ''}</div>
+              <div class="muted" style="font-size:13px;margin-top:6px">ขอ PIN ได้ที่ผู้ดูแลหอ ${PUB.phone && PUB.phone !== '-' ? '· โทร ' + esc(PUB.phone) : ''}</div>
             </div>
             <div data-for="admin" class="hidden">
               <label>รหัสผ่านผู้ดูแล</label><input name="password" type="password" autocomplete="current-password">
@@ -317,9 +314,8 @@
     const filter = state.roomFilter || 'all';
     $('#view').innerHTML = `
       <section class="hero">
-        <span class="eyebrow">ภาพรวมหอพัก · ${thMonth(thisMonth())}</span>
-        <h1>จัดการหอพักทั้ง ${d.rooms.length} ห้อง<br><span class="accent">ได้ในที่เดียว</span></h1>
-        <p>บันทึกผู้เช่า จดมิเตอร์ ออกบิล ตรวจสลิป และติดตามงานซ่อม</p>
+        <span class="eyebrow">${thMonth(thisMonth())}</span>
+        <h1>ภาพรวม</h1>
         <div class="hero-actions">
           <button type="button" id="hGoBill">${ic('bill')} จดมิเตอร์ & ออกบิล</button>
           <button type="button" class="light" id="hGoPay">${ic('card')} ตรวจสลิป${d.pendingPayments ? ' (' + d.pendingPayments + ')' : ''}</button>
@@ -331,7 +327,7 @@
           <div class="stat"><span class="ic">${ic('check')}</span><div><b>${pct}%</b><span>อัตราการเข้าพัก</span></div></div>
         </div>
       </section>
-      ${sec('ห้องพัก', `ผังห้อง <span class="accent">ทั้งหมด</span>`, `
+      ${sec('ห้องทั้งหมด', `
         <div class="filters">
           ${[['all', 'ทั้งหมด'], ['occupied', 'มีผู้เช่า'], ['vacant', 'ว่าง'], ['maintenance', 'ปิดปรับปรุง']].map(([k, l]) => `<button type="button" class="small ${filter === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
         </div>`)}
@@ -343,7 +339,7 @@
             <div class="row spread"><span class="meta">${fmt(r.rent)} ฿/เดือน</span>${pill(r.status)}</div>
           </button>`).join('') || '<div class="muted">ไม่มีห้องในกลุ่มนี้</div>'}
       </div>
-      ${d.openRepairs ? `<div class="card li" style="margin-top:16px"><span class="ic">${ic('wrench')}</span><div class="grow"><strong>งานซ่อมค้าง ${d.openRepairs} รายการ</strong><div class="muted">ตรวจสอบและอัปเดตสถานะ</div></div><button type="button" class="small ghost" id="hGoRep">ดูทั้งหมด ${ic('arrow')}</button></div>` : ''}`;
+      ${d.openRepairs ? `<div class="card li" style="margin-top:16px"><span class="ic">${ic('wrench')}</span><div class="grow"><strong>งานซ่อมค้าง ${d.openRepairs} รายการ</strong></div><button type="button" class="small ghost" id="hGoRep">ดู</button></div>` : ''}`;
     $('.rooms').onclick = (e) => { const b = e.target.closest('[data-room]'); if (b) openRoom(b.dataset.room); };
     $('.filters').onclick = (e) => { const b = e.target.closest('[data-f]'); if (b) { state.roomFilter = b.dataset.f; adminRooms(true); } };
     $('#hGoBill').onclick = () => go('billing');
@@ -373,7 +369,7 @@
           </div>
         </div>` : `
         <div class="card">
-          <div class="li"><span class="ic">${ic('door')}</span><div><div class="kicker">ห้องว่าง</div><strong style="font-size:18px">บันทึกผู้เช่าย้ายเข้า</strong></div></div>
+          <div class="li"><span class="ic">${ic('door')}</span><div><div class="muted" style="font-size:13px">ห้องว่าง</div><strong style="font-size:18px">บันทึกย้ายเข้า</strong></div></div>
           <form id="inForm">
             <label>ชื่อ-นามสกุลผู้เช่า *</label><input name="name" required>
             <div class="grid2">
@@ -498,11 +494,8 @@
     state.billMonth = month;
     const [rows, invoices] = await Promise.all([api('apiGetMonthSheet', month), api('apiListInvoices', month)]);
     $('#view').innerHTML = `
-      ${sec('มิเตอร์ & บิล', `จดมิเตอร์ <span class="accent">${thMonth(month)}</span>`, `<input type="month" id="mon" value="${month}" style="width:auto">`)}
-      <div class="card li" style="box-shadow:none;background:var(--accent-soft);border-color:transparent">
-        <span class="ic" style="background:var(--card)">${ic('bolt')}</span>
-        <div class="muted" style="font-size:14px">กรอกเลขมิเตอร์ล่าสุดของแต่ละห้อง ระบบจะคำนวณหน่วยที่ใช้จากเลขเดือนก่อน แล้วออกใบแจ้งหนี้ PDF ให้ทุกห้อง</div>
-      </div>
+      ${sec(`จดมิเตอร์ ${thMonth(month)}`, `<input type="month" id="mon" value="${month}" style="width:auto">`)}
+      <p class="muted" style="font-size:14px;margin-top:-6px">กรอกเลขมิเตอร์สิ้นเดือน หน่วยที่ใช้คิดจากเลขเดือนก่อน</p>
       <div class="card scroll-x">
         ${rows.length ? `<table id="meter">
           <thead><tr><th>ห้อง</th><th class="num">${ic('drop')} น้ำ (ก่อน)</th><th>น้ำ (ล่าสุด)</th><th class="num">${ic('bolt')} ไฟ (ก่อน)</th><th>ไฟ (ล่าสุด)</th><th>บิล</th></tr></thead>
@@ -521,7 +514,7 @@
         <button type="button" id="genInv">${ic('bill')} บันทึก + ออกใบแจ้งหนี้</button>
       </div>
       <div id="genResult" style="margin-top:12px"></div>
-      ${sec('ใบแจ้งหนี้', `บิลเดือน <span class="accent">${thMonth(month)}</span>`)}
+      ${sec(`ใบแจ้งหนี้ ${thMonth(month)}`)}
       <div class="card">${invoices.length ? invoices.map((i) => `
         <div class="list-item row spread">
           <div class="grow"><strong>ห้อง ${esc(i.roomId)}</strong> ${esc(i.tenantName)}<div class="muted">${fmt(i.total)} ฿ · ครบกำหนด ${thDate(i.dueDate)}</div></div>
@@ -544,7 +537,7 @@
         await api('apiSaveReadings', month, collect());
         const res = await api('apiGenerateInvoices', month);
         await adminBilling(month);
-        $('#genResult').innerHTML = `<div class="card">${res.map((r) => `<div>ห้อง ${esc(r.roomId)}: ${r.ok ? '✅ ' + fmt(r.total) + ' ฿' : '⚠️ ' + esc(r.error)}</div>`).join('')}</div>`;
+        $('#genResult').innerHTML = `<div class="card">${res.map((r) => `<div>ห้อง ${esc(r.roomId)}: ${r.ok ? fmt(r.total) + ' บาท' : '<span style="color:var(--bad)">' + esc(r.error) + '</span>'}</div>`).join('')}</div>`;
       });
     };
     $$('[data-inv]').forEach((sel) => {
@@ -560,7 +553,7 @@
     status = status === undefined ? 'pending' : status;
     const rows = await api('apiListPayments', status);
     $('#view').innerHTML = `
-      ${sec('การชำระเงิน', `ตรวจ<span class="accent">สลิปโอนเงิน</span>`, `<select id="pf" style="width:auto"><option value="pending">รอตรวจ</option><option value="">ทั้งหมด</option></select>`)}
+      ${sec('สลิปโอนเงิน', `<select id="pf" style="width:auto"><option value="pending">รอตรวจ</option><option value="">ทั้งหมด</option></select>`)}
       <div class="card">${rows.length ? rows.map((p) => `
         <div class="list-item">
           <div class="li">
@@ -603,7 +596,7 @@
     onlyOpen = onlyOpen === undefined ? true : onlyOpen;
     const rows = await api('apiListRepairs', onlyOpen);
     $('#view').innerHTML = `
-      ${sec('ซ่อมบำรุง', `งานซ่อม & <span class="accent">อะไหล่</span>`, `<select id="rf" style="width:auto"><option value="1">ยังไม่เสร็จ</option><option value="0">ทั้งหมด</option></select>
+      ${sec('งานซ่อม', `<select id="rf" style="width:auto"><option value="1">ยังไม่เสร็จ</option><option value="0">ทั้งหมด</option></select>
         <button type="button" id="addR">${ic('plus')} เพิ่ม</button>`)}
       <div class="card">${rows.length ? rows.map(repairRow).join('') : '<span class="muted">ไม่มีรายการ</span>'}</div>`;
     $('#rf').value = onlyOpen ? '1' : '0';
@@ -656,7 +649,7 @@
     // จึงห้ามมีสองตัวนี้ในโค้ด: ทับสองตัวติดกัน (ใช้ :\/\/ แทน) และทับตามด้วยดอกจัน (ใช้ /\x2a แทน)
     const docUrl = (id) => id ? `https:\/\/docs.google.com/document/d/${encodeURIComponent(id)}/edit` : '';
     $('#view').innerHTML = `
-      ${sec('ตั้งค่า', `ข้อมูลหอพัก & <span class="accent">อัตราค่าบริการ</span>`)}
+      ${sec('ตั้งค่า')}
       <form id="setForm" class="cols">
         <div class="card" style="margin:0">
           <label>ชื่อหอพัก</label><input name="dormName" value="${esc(s.dormName)}">
@@ -728,13 +721,13 @@
           <div class="hero-big">${fmt(dueTotal)} <span style="font-size:.5em">บาท</span></div>
           <p>ครบกำหนด ${thDate(first.dueDate)}</p>
           <div class="hero-actions"><button type="button" data-slip="${esc(first.id)}">${ic('upload')} แนบสลิป ${thMonth(first.month)}</button></div>`
-        : `<h1>ไม่มียอด<span class="accent">ค้างชำระ</span> 🎉</h1><p>${unpaid.length ? 'สลิปของคุณอยู่ระหว่างตรวจสอบ' : 'ขอบคุณที่ชำระตรงเวลา'}</p>`}
+        : `<h1>ไม่มียอดค้างชำระ</h1>${unpaid.length ? '<p>สลิปรอตรวจสอบ</p>' : ''}`}
         <div class="stat" style="margin-top:18px;align-items:flex-start">
           <span class="ic">${ic('card')}</span>
           <div><span>ชำระโดยโอนเข้า</span><div style="white-space:pre-line;color:#fff;font-weight:600">${esc(d.settings.bankInfo)}</div></div>
         </div>
       </section>
-      ${sec('ใบแจ้งหนี้', `บิล<span class="accent">ของฉัน</span>`)}
+      ${sec('ใบแจ้งหนี้')}
       <div class="cols">
       ${d.invoices.length ? d.invoices.map((i) => {
         const pays = d.payments.filter((p) => p.invoiceId === i.id);
@@ -779,11 +772,10 @@
   async function tenantRepair() {
     const d = state.tenant || await loadTenant();
     $('#view').innerHTML = `
-      ${sec('ซ่อมบำรุง', `แจ้ง<span class="accent">ซ่อม</span>`)}
+      ${sec('แจ้งซ่อม')}
       <div class="cols">
         <form id="trForm" class="card" style="margin:0">
-          <div class="li"><span class="ic">${ic('wrench')}</span><div><strong>มีอะไรเสีย บอกเราได้เลย</strong><div class="muted" style="font-size:14px">แนบรูปให้ช่างเห็นปัญหาได้ชัดขึ้น</div></div></div>
-          <label>เรื่อง *</label><input name="title" required placeholder="เช่น ไฟห้องน้ำไม่ติด">
+          <label style="margin-top:0">เรื่อง *</label><input name="title" required placeholder="เช่น ไฟห้องน้ำไม่ติด">
           <label>รายละเอียด</label><textarea name="detail"></textarea>
           <label>แนบรูป (ไม่เกิน 3 รูป)</label><input name="photos" type="file" accept="image/\x2a" multiple>
           <p style="margin-top:16px"><button type="submit" style="width:100%">ส่งเรื่องแจ้งซ่อม</button></p>
@@ -810,7 +802,7 @@
   async function tenantMe() {
     const d = state.tenant || await loadTenant();
     $('#view').innerHTML = `
-      ${sec('ข้อมูลการเข้าพัก', `ห้อง<span class="accent">ของฉัน</span>`)}
+      ${sec('ห้องของฉัน')}
       <div class="cols">
         <div class="card" style="margin:0">
           <div class="tenant-head"><span class="avatar">${initial(d.tenancy.tenantName)}</span>
