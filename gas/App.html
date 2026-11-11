@@ -206,8 +206,8 @@
   // รายการไฟล์สัญญาที่เซ็นแล้ว (กดเปิดดูได้)
   const signedList = (list, showRetain) => (list || []).length ? `<div class="thumbs">${list.map((c, i) => `
     <button type="button" class="small ghost" data-file="${esc(c.fileId)}" data-title="สัญญาที่เซ็นแล้ว หน้า ${i + 1}"
-      title="อัปโหลด ${thDate(c.uploadedAt)}${c.retainUntil ? ' · เก็บถึง ' + thDate(c.retainUntil) : ''}">${ic('file')} หน้า ${i + 1}</button>`).join('')}</div>
-    ${showRetain !== false ? `<div class="muted" style="font-size:12px;margin-top:4px">${list.map((c, i) => `หน้า ${i + 1}: เข้าระบบ ${thDate(c.uploadedAt)}${c.retainUntil ? ' · เก็บถึง ' + thDate(c.retainUntil) : ''}`).join(' | ')}</div>` : ''}` : '';
+      title="อัปโหลด ${thDate(c.uploadedAt)}${c.retainUntil ? ' · เก็บถึง ' + thDate(c.retainUntil) : ' · เก็บถึง 10 ปีหลังย้ายออก'}">${ic('file')} หน้า ${i + 1}</button>`).join('')}</div>
+    ${showRetain !== false ? `<div class="muted" style="font-size:12px;margin-top:4px">${list.map((c, i) => `หน้า ${i + 1}: เข้าระบบ ${thDate(c.uploadedAt)}${c.retainUntil ? ' · เก็บถึง ' + thDate(c.retainUntil) : ' · เก็บถึง 10 ปีหลังย้ายออก'}`).join(' | ')}</div>` : ''}` : '';
 
   // PDF แสดงใน iframe ไม่ได้ (Chrome/มือถือบล็อกใน sandbox ของ Apps Script) จึงวาดเองด้วย PDF.js
   const PDFJS = 'https:\/\/cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/';

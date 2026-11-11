@@ -127,12 +127,19 @@ function apiMoveOut(token, data) {
   if (!room || !room.currentTenancyId) throw new Error('ห้องนี้ไม่มีผู้เช่า');
   const tenancyId = room.currentTenancyId;
   const moveOut = data.moveOut || today_();
-  fsUpdate_(COL.TENANCIES, tenancyId, {
+  const t = fsGet_(COL.TENANCIES, tenancyId) || {};
+  // เริ่มนับระยะเวลาเก็บสัญญาและเอกสารประกอบ 10 ปีจากวันย้ายออก
+  const until = retainUntil_(moveOut);
+  const upd = {
     moveOut: moveOut,
     status: 'ended',
     note: data.note || '',
     pinHash: '', // ปิดการเข้าระบบ
-  });
+    retainUntil: until,
+    signedContracts: (t.signedContracts || []).map(function (c) { c.retainUntil = until; return c; }),
+  };
+  if (t.contractFileId) upd.contractRetainUntil = until;
+  fsUpdate_(COL.TENANCIES, tenancyId, upd);
   fsUpdate_(COL.ROOMS, room.id, { status: 'vacant', currentTenancyId: '' });
   const n = revokeSessions_({ tenancyId: tenancyId });
   audit_(me, 'บันทึกย้ายออก', 'ห้อง ' + room.id, (data.note || '') + ' (ตัดการเข้าระบบ ' + n + ' เครื่อง)');

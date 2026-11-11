@@ -74,7 +74,7 @@ function apiGenerateContract(token, tenancyId) {
   DriveApp.getFileById(r.pdfId).setDescription('room:' + t.roomId + '|tenancy:' + tenancyId);
   fsUpdate_(COL.TENANCIES, tenancyId, {
     contractFileId: r.pdfId, contractDocId: r.docId,
-    contractCreatedAt: today_(), contractRetainUntil: retainUntil_(today_()),
+    contractCreatedAt: today_(), contractRetainUntil: t.moveOut ? retainUntil_(t.moveOut) : '',
   });
   audit_(me, 'สร้างสัญญาเช่า', 'ห้อง ' + t.roomId, tenant.name || '');
   return { pdfId: r.pdfId, docUrl: 'https://docs.google.com/document/d/' + r.docId + '/edit' };
@@ -137,7 +137,7 @@ function apiUploadSignedContract(token, tenancyId, files) {
     list.push({
       fileId: id, name: fl.name || ('หน้า ' + (list.length + 1)), uploadedAt: new Date().toISOString(),
       by: me.email || me.name || '',
-      retainUntil: retainUntil_(today_()), // PDPA: นับ 10 ปีจากวันที่เอกสารเข้าระบบ
+      retainUntil: t.moveOut ? retainUntil_(t.moveOut) : '', // ระหว่างเช่ายังไม่นับ กำหนดเมื่อย้ายออก
     });
   });
   fsUpdate_(COL.TENANCIES, tenancyId, { signedContracts: list });
@@ -154,9 +154,12 @@ function signedFolder_() {
   return id;
 }
 
-/** วันครบกำหนดเก็บเอกสาร = วันที่เอกสารเข้าระบบ + 10 ปี (ตาม PDPA นับจากวันที่ได้รับเอกสาร) */
-function retainUntil_(receivedIso) {
-  const p = String(receivedIso).slice(0, 10).split('-');
+/**
+ * วันครบกำหนดเก็บเอกสารสัญญา = วันย้ายออก + 10 ปี (อายุความทั่วไป ป.พ.พ. 193/30)
+ * ระหว่างที่ยังเช่าอยู่ยังไม่นับ เพราะสัญญาและเอกสารประกอบยังต้องใช้
+ */
+function retainUntil_(moveOutIso) {
+  const p = String(moveOutIso).slice(0, 10).split('-');
   return (Number(p[0]) + RETAIN_YEARS) + '-' + p[1] + '-' + p[2];
 }
 const RETAIN_YEARS = 10;
