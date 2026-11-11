@@ -175,7 +175,20 @@
   .s-paid, .s-approved, .s-done, .s-occupied, .s-active { color: var(--ok); }
   .s-pending, .s-in_progress, .s-reported, .s-maintenance { color: var(--warn); }
   .s-unpaid, .s-rejected { color: var(--bad); }
-  .s-vacant, .s-ended { color: var(--muted); }
+  .s-vacant, .s-ended, .s-cancelled { color: var(--muted); }
+  details summary { cursor: pointer; padding: 2px 0; }
+  .money-in { color: var(--ok); }
+  .money-out { color: var(--bad); }
+  .acc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+  @media (min-width: 720px) { .acc-grid { grid-template-columns: repeat(4, 1fr); } }
+  .acc-grid .card { margin: 0; }
+  .acc-grid b { display: block; font-family: var(--head); font-size: 22px; font-weight: 600; }
+  .bars { display: flex; align-items: flex-end; gap: 6px; height: 120px; padding-top: 8px; }
+  .bars .m { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+  .bars .pair { display: flex; align-items: flex-end; gap: 2px; height: 96px; }
+  .bars .pair span { width: 7px; border-radius: 3px 3px 0 0; }
+  .bars .in { background: var(--accent); }
+  .bars .out { background: var(--bad); opacity: .75; }
 
   /* ===== ตาราง / รายการ ===== */
   table { width: 100%; border-collapse: separate; border-spacing: 0; }

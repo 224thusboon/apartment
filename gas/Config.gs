@@ -19,6 +19,8 @@ const COL = {
   INVOICES: 'invoices',     // id = {roomId}_{YYYY-MM}
   PAYMENTS: 'payments',     // สลิปที่ผู้เช่าอัปโหลด
   REPAIRS: 'repairs',
+  CHARGES: 'charges',       // รายการเรียกเก็บเพิ่มรายห้อง (เช่น ค่าซ่อมที่ผู้เช่าทำเสียหาย) รวมเข้าบิลเดือนนั้น
+  LEDGER: 'ledger',         // บัญชีรายรับ-รายจ่ายที่บันทึกเอง
   SESSIONS: 'sessions',
 };
 

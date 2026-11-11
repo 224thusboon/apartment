@@ -32,6 +32,6 @@ function apiReviewPayment(token, paymentId, approve, note) {
   const p = fsGet_(COL.PAYMENTS, paymentId);
   if (!p) throw new Error('ไม่พบรายการ');
   fsUpdate_(COL.PAYMENTS, paymentId, { status: approve ? 'approved' : 'rejected', note: note || '' });
-  fsUpdate_(COL.INVOICES, p.invoiceId, { status: approve ? 'paid' : 'unpaid' });
+  fsUpdate_(COL.INVOICES, p.invoiceId, { status: approve ? 'paid' : 'unpaid', paidAt: approve ? today_() : '' });
   return true;
 }

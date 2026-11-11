@@ -12,17 +12,43 @@ function apiSaveRepair(token, repair, photos) {
   (photos || []).forEach(function (p) {
     photoIds.push(saveUpload_(settings.photoFolderId, p, repair.roomId, 'repair'));
   });
-  return fsSet_(COL.REPAIRS, repair.id || null, {
+  const cost = Number(repair.cost) || 0;
+  const date = repair.date || today_();
+  const saved = fsSet_(COL.REPAIRS, repair.id || null, {
     roomId: repair.roomId,
-    date: repair.date || today_(),
+    date: date,
     title: repair.title || '',
     detail: repair.detail || '',
     parts: repair.parts || '',     // อะไหล่ที่เปลี่ยน
-    cost: Number(repair.cost) || 0,
+    cost: cost,
     status: repair.status || 'done',
     reportedBy: (old && old.reportedBy) || 'admin',
     photoIds: photoIds,
+    chargeId: (old && old.chargeId) || '',
+    expenseId: (old && old.expenseId) || '',
   });
+
+  // เรียกเก็บจากผู้เช่า -> รายการเรียกเก็บเพิ่ม เข้าบิลเดือนที่เลือก
+  const chargeAmt = Number(repair.chargeAmount) || 0;
+  if (repair.chargeTenant && chargeAmt > 0 && !saved.chargeId) {
+    const c = apiAddCharge(token, {
+      roomId: repair.roomId, month: repair.chargeMonth || date.slice(0, 7),
+      name: 'ค่าซ่อม ' + (repair.title || ''), qty: 1, price: chargeAmt, note: repair.parts || '', repairId: saved.id,
+    });
+    fsUpdate_(COL.REPAIRS, saved.id, { chargeId: c.id });
+    saved.chargeId = c.id;
+  }
+  // บันทึกเป็นรายจ่ายของหอ
+  if (repair.addExpense && cost > 0 && !saved.expenseId) {
+    const e = fsSet_(COL.LEDGER, null, {
+      type: 'expense', date: date, month: date.slice(0, 7), category: 'ค่าซ่อม/อะไหล่',
+      amount: cost, note: 'ห้อง ' + repair.roomId + ' ' + (repair.title || '') + (repair.parts ? ' (' + repair.parts + ')' : ''),
+      fileId: '', repairId: saved.id,
+    });
+    fsUpdate_(COL.REPAIRS, saved.id, { expenseId: e.id });
+    saved.expenseId = e.id;
+  }
+  return saved;
 }
 
 function apiListRepairs(token, onlyOpen) {
@@ -59,7 +85,7 @@ function apiTenantHome(token) {
   ]);
   const t = r[0].filter(function (x) { return x.tenantId === s.tenantId; })[0];
   if (!t) throw new Error('AUTH: สิทธิ์การเข้าพักสิ้นสุดแล้ว');
-  const invoices = sortBy_(r[1].filter(function (i) { return i.tenancyId === t.id; }), 'month', true);
+  const invoices = sortBy_(r[1].filter(function (i) { return i.tenancyId === t.id && i.status !== 'cancelled'; }), 'month', true);
   const payments = r[2]
     .filter(function (p) { return invoices.some(function (i) { return i.id === p.invoiceId; }); });
   const repairs = sortBy_(r[3], 'date', true)

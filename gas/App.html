@@ -22,7 +22,9 @@
     paid: 'ชำระแล้ว', pending: 'รอตรวจสลิป', unpaid: 'ค้างชำระ', approved: 'อนุมัติ', rejected: 'ไม่ผ่าน',
     reported: 'แจ้งแล้ว', in_progress: 'กำลังซ่อม', done: 'เสร็จแล้ว',
     occupied: 'มีผู้เช่า', vacant: 'ว่าง', maintenance: 'ปิดปรับปรุง', active: 'พักอยู่', ended: 'ย้ายออกแล้ว',
+    cancelled: 'ยกเลิก',
   };
+  const fmtQ = (n) => { const x = Number(n) || 0; return Number.isInteger(x) ? String(x) : x.toFixed(2); };
   const pill = (s) => `<span class="pill s-${esc(s)}">${esc(STATUS[s] || s || '-')}</span>`;
 
   // ไอคอนเส้น (24x24)
@@ -44,6 +46,7 @@
     plus: '<path d="M12 5v14M5 12h14"/>',
     arrow: '<path d="M5 12h14M13 6l6 6-6 6"/>',
     upload: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v4h16v-4"/>',
+    chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
   };
   const ic = (name) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
   const sec = (title, right) => `<div class="sec"><h2>${title}</h2>${right ? `<div class="row">${right}</div>` : ''}</div>`;
@@ -109,7 +112,7 @@
     });
   }
   // คำสั่งที่แก้ข้อมูล ให้ล้างข้อมูลที่จำไว้ทั้งหมด หน้าถัดไปจะได้ไม่โชว์ของเก่า
-  const READ_ONLY = /^api(Get|List|AdminBootstrap|RoomDetail|TenantHome|WhoAmI)/;
+  const READ_ONLY = /^api(Get|List|AdminBootstrap|RoomDetail|TenantHome|WhoAmI|Account)/;
   async function api(fn, ...args) {
     const res = await run(fn, state.token, ...args);
     if (!READ_ONLY.test(fn)) state.cache = {};
@@ -365,6 +368,7 @@
         { id: 'billing', ico: 'bill', label: 'มิเตอร์ & บิล', render: adminBilling },
         { id: 'payments', ico: 'card', label: 'สลิป', render: adminPayments },
         { id: 'repairs', ico: 'wrench', label: 'งานซ่อม', render: adminRepairs },
+        { id: 'accounts', ico: 'chart', label: 'บัญชี', render: adminAccounts },
         { id: 'settings', ico: 'gear', label: 'ตั้งค่า', render: adminSettings },
       ]);
       go('rooms');
@@ -453,6 +457,7 @@
           <div class="row" style="margin-top:14px">
             <button type="button" class="small" id="btnContract">${cur.contractFileId ? 'สร้างสัญญาใหม่' : 'สร้างสัญญาเช่า'}</button>
             ${cur.contractFileId ? `<button type="button" class="small ghost" data-file="${esc(cur.contractFileId)}" data-title="สัญญาเช่า">ดูสัญญา</button>` : ''}
+            <button type="button" class="small ghost" id="btnCharge">เรียกเก็บเพิ่ม</button>
             <button type="button" class="small ghost" id="btnPin">ออก PIN ใหม่</button>
             <button type="button" class="small danger" id="btnOut">ย้ายออก</button>
           </div>
@@ -532,6 +537,7 @@
           <p class="row"><button type="button" data-file="${esc(res.pdfId)}" data-title="สัญญาเช่า">ดู PDF</button>
           <a class="btn ghost" href="${esc(res.docUrl)}" target="_blank" rel="noopener">แก้ไขใน Google Docs</a></p>`);
       });
+      $('#btnCharge', body).onclick = () => chargeForm({ roomId });
       $('#btnPin', body).onclick = (e) => {
         if (!confirm('ออก PIN ใหม่? PIN เดิมจะใช้ไม่ได้ทันที')) return;
         busy(e.target, async () => showPin(roomId, (await api('apiResetPin', roomId)).pin));
@@ -582,10 +588,12 @@
     month = month || state.billMonth || thisMonth();
     state.billMonth = month;
     return swr('bill_' + month,
-      () => Promise.all([api('apiGetMonthSheet', month), api('apiListInvoices', month)]),
-      (r) => drawBilling(month, r[0], r[1]));
+      () => Promise.all([api('apiGetMonthSheet', month), api('apiListInvoices', month), api('apiListCharges', month)]),
+      (r) => drawBilling(month, r[0], r[1], r[2]));
   }
-  function drawBilling(month, rows, invoices) {
+  function drawBilling(month, rows, invoices, charges) {
+    const active = invoices.filter((i) => i.status !== 'cancelled');
+    const cancelled = invoices.filter((i) => i.status === 'cancelled');
     $('#view').innerHTML = `
       ${sec(`จดมิเตอร์ ${thMonth(month)}`, `<input type="month" id="mon" value="${month}" style="width:auto">`)}
       <p class="muted" style="font-size:14px;margin-top:-6px">กรอกเลขมิเตอร์สิ้นเดือน หน่วยที่ใช้คิดจากเลขเดือนก่อน</p>
@@ -607,17 +615,35 @@
         <button type="button" id="genInv">${ic('bill')} บันทึก + ออกใบแจ้งหนี้</button>
       </div>
       <div id="genResult" style="margin-top:12px"></div>
-      ${sec(`ใบแจ้งหนี้ ${thMonth(month)}`)}
-      <div class="card">${invoices.length ? invoices.map((i) => `
+
+      ${sec(`รายการเรียกเก็บเพิ่ม ${thMonth(month)}`, `<button type="button" class="small" id="addCharge">${ic('plus')} เพิ่ม</button>`)}
+      <p class="muted" style="font-size:14px;margin-top:-6px">เช่น ค่าซ่อมที่ผู้เช่าทำเสียหาย จะรวมเข้าใบแจ้งหนี้ของห้องนั้นตอนกดออกใบแจ้งหนี้</p>
+      <div class="card">${charges.length ? charges.map((c) => `
         <div class="list-item row spread">
-          <div class="grow"><strong>ห้อง ${esc(i.roomId)}</strong> ${esc(i.tenantName)}<div class="muted">${fmt(i.total)} ฿ · ครบกำหนด ${thDate(i.dueDate)}</div></div>
-          <div class="row">
-            ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.roomId)}">PDF</button>` : ''}
+          <div class="grow"><strong>ห้อง ${esc(c.roomId)}</strong> · ${esc(c.name)}
+            <div class="muted" style="font-size:14px">${fmtQ(c.qty)} × ${fmt(c.price)} = ${fmt(c.amount)} บาท${c.note ? ' · ' + esc(c.note) : ''}</div></div>
+          <button type="button" class="small ghost" data-delcharge="${esc(c.id)}">ลบ</button>
+        </div>`).join('') : '<span class="muted">ไม่มี</span>'}</div>
+
+      ${sec(`ใบแจ้งหนี้ ${thMonth(month)}`)}
+      <div class="card">${active.length ? active.map((i) => `
+        <div class="list-item">
+          <div class="row spread">
+            <div class="grow"><strong>ห้อง ${esc(i.roomId)}</strong> ${esc(i.tenantName)}
+              <div class="muted">เลขที่ ${esc(i.number || '-')} · ${fmt(i.total)} บาท · ครบกำหนด ${thDate(i.dueDate)}</div></div>
             <select data-inv="${esc(i.id)}" style="width:auto">
               ${['unpaid', 'pending', 'paid'].map((s) => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${STATUS[s]}</option>`).join('')}
             </select>
           </div>
-        </div>`).join('') : '<span class="muted">ยังไม่ได้ออกใบแจ้งหนี้</span>'}</div>`;
+          <div class="row" style="margin-top:6px">
+            ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.roomId)}">PDF</button>` : ''}
+            ${i.status !== 'paid' ? `<button type="button" class="small ghost" data-editinv="${esc(i.id)}">แก้ไข</button>
+            <button type="button" class="small ghost" data-cancelinv="${esc(i.id)}" style="color:var(--bad);border-color:var(--bad)">ยกเลิกใบนี้</button>` : ''}
+          </div>
+        </div>`).join('') : '<span class="muted">ยังไม่ได้ออกใบแจ้งหนี้</span>'}</div>
+      ${cancelled.length ? `<details class="card"><summary class="muted">ใบที่ยกเลิกแล้ว (${cancelled.length})</summary>
+        ${cancelled.map((i) => `<div class="list-item muted" style="font-size:14px">ห้อง ${esc(i.roomId)} · เลขที่ ${esc(i.number || '-')} · ${fmt(i.total)} บาท · ยกเลิก ${thDate(i.cancelledAt)}${i.cancelReason ? ' (' + esc(i.cancelReason) + ')' : ''}</div>`).join('')}
+      </details>` : ''}`;
 
     $('#mon').onchange = (e) => e.target.value && go_billing(e.target.value);
     const collect = () => $$('#meter tbody tr').map((tr) => ({
@@ -635,9 +661,97 @@
     };
     $$('[data-inv]').forEach((sel) => {
       sel.onchange = async () => {
-        try { await api('apiSetInvoiceStatus', sel.dataset.inv, sel.value); toast('อัปเดตสถานะแล้ว'); } catch (e) { fail(e); }
+        try { await api('apiSetInvoiceStatus', sel.dataset.inv, sel.value); toast('อัปเดตสถานะแล้ว'); adminBilling(month); } catch (e) { fail(e); }
       };
     });
+    $('#addCharge').onclick = () => chargeForm({ month });
+    $$('[data-delcharge]').forEach((b) => {
+      b.onclick = () => {
+        if (!confirm('ลบรายการนี้?')) return;
+        busy(b, async () => { await api('apiDeleteCharge', b.dataset.delcharge); toast('ลบแล้ว'); adminBilling(month); });
+      };
+    });
+    $$('[data-editinv]').forEach((b) => { b.onclick = () => invoiceForm(invoices.find((x) => x.id === b.dataset.editinv), month); });
+    $$('[data-cancelinv]').forEach((b) => {
+      b.onclick = () => {
+        const inv = invoices.find((x) => x.id === b.dataset.cancelinv);
+        const reason = prompt(`ยกเลิกใบแจ้งหนี้เลขที่ ${inv.number || '-'} ห้อง ${inv.roomId}?\nเหตุผล (ไม่บังคับ):`, '');
+        if (reason === null) return;
+        busy(b, async () => { await api('apiCancelInvoice', inv.id, reason); toast('ยกเลิกแล้ว กดออกใบแจ้งหนี้ใหม่ได้'); adminBilling(month); });
+      };
+    });
+  }
+
+  // แก้ใบแจ้งหนี้: เลขที่ + รายการ
+  function invoiceForm(inv, month) {
+    const rowHtml = (it) => `
+      <div class="inv-row row" style="gap:6px;margin-bottom:6px;flex-wrap:nowrap">
+        <input name="name" value="${esc(it.name || '')}" placeholder="รายการ" style="flex:3;min-width:0">
+        <input name="qty" type="number" step="any" value="${esc(it.qty == null ? 1 : it.qty)}" style="flex:1;min-width:0" aria-label="จำนวน">
+        <input name="price" type="number" step="any" value="${esc(it.price == null ? '' : it.price)}" style="flex:1.3;min-width:0" aria-label="ราคา">
+        <button type="button" class="small ghost" data-rmrow aria-label="ลบแถว">ลบ</button>
+      </div>`;
+    const b = openModal('แก้ไขใบแจ้งหนี้ ห้อง ' + inv.roomId, `
+      <form id="invForm">
+        <label>เลขที่ใบแจ้งหนี้</label><input name="number" value="${esc(inv.number || '')}" required>
+        <label>รายการ (ชื่อ · จำนวน · ราคาต่อหน่วย)</label>
+        <div id="invRows">${(inv.items || []).map(rowHtml).join('')}</div>
+        <button type="button" class="small ghost" id="addRow">${ic('plus')} เพิ่มรายการ</button>
+        <p class="muted" id="invTotal" style="margin-top:12px"></p>
+        <p><button type="submit">บันทึกและออก PDF ใหม่</button></p>
+      </form>`);
+    const rowsBox = $('#invRows', b);
+    const readRows = () => $$('.inv-row', rowsBox).map((r) => ({
+      name: $('[name=name]', r).value, qty: $('[name=qty]', r).value, price: $('[name=price]', r).value,
+    }));
+    const showTotal = () => {
+      const t = readRows().reduce((s, r) => s + (Number(r.qty) || 0) * (Number(r.price) || 0), 0);
+      $('#invTotal', b).textContent = 'ยอดรวม ' + fmt(t) + ' บาท';
+    };
+    rowsBox.addEventListener('input', showTotal);
+    rowsBox.addEventListener('click', (e) => { if (e.target.closest('[data-rmrow]')) { e.target.closest('.inv-row').remove(); showTotal(); } });
+    $('#addRow', b).onclick = () => { rowsBox.insertAdjacentHTML('beforeend', rowHtml({ qty: 1 })); showTotal(); };
+    showTotal();
+    $('#invForm', b).onsubmit = (e) => {
+      e.preventDefault();
+      busy($('button[type=submit]', e.target), async () => {
+        await api('apiUpdateInvoice', inv.id, { number: $('[name=number]', e.target).value, items: readRows() });
+        closeModal();
+        toast('บันทึกแล้ว');
+        adminBilling(month);
+      });
+    };
+  }
+
+  // เพิ่มรายการเรียกเก็บของห้อง
+  async function chargeForm(pre) {
+    if (!state.admin) { try { await loadAdmin(); } catch (e) { return fail(e); } }
+    const rooms = ((state.admin && state.admin.rooms) || []).filter((r) => r.status === 'occupied');
+    const b = openModal('เพิ่มรายการเรียกเก็บ', `
+      <form id="chgForm">
+        <div class="grid2">
+          <div><label>ห้อง</label><select name="roomId" required>${rooms.map((r) => `<option value="${esc(r.id)}" ${r.id === pre.roomId ? 'selected' : ''}>${esc(r.number)} ${esc(r.tenantName)}</option>`).join('')}</select></div>
+          <div><label>เรียกเก็บในบิลเดือน</label><input name="month" type="month" value="${esc(pre.month || thisMonth())}" required></div>
+        </div>
+        <label>รายการ *</label><input name="name" required value="${esc(pre.name || '')}" placeholder="เช่น ค่าซ่อมประตู">
+        <div class="grid2">
+          <div><label>จำนวน</label><input name="qty" type="number" step="any" value="1"></div>
+          <div><label>ราคาต่อหน่วย (บาท) *</label><input name="price" type="number" step="any" required value="${esc(pre.price || '')}"></div>
+        </div>
+        <label>หมายเหตุ</label><input name="note" value="${esc(pre.note || '')}">
+        <p><button type="submit">บันทึก</button></p>
+      </form>`);
+    if (!rooms.length) $('#chgForm', b).insertAdjacentHTML('afterbegin', '<p class="muted">ยังไม่มีห้องที่มีผู้เช่า</p>');
+    $('#chgForm', b).onsubmit = (e) => {
+      e.preventDefault();
+      const f = formData(e.target);
+      busy($('button[type=submit]', e.target), async () => {
+        await api('apiAddCharge', f);
+        closeModal();
+        toast('เพิ่มแล้ว จะรวมในใบแจ้งหนี้เดือน ' + thMonth(f.month));
+        if (state.tab === 'billing') adminBilling(state.billMonth);
+      });
+    };
   }
   function go_billing(m) { $('#view').innerHTML = '<div class="center muted">กำลังโหลด…</div>'; adminBilling(m).catch(fail); }
 
@@ -719,15 +833,26 @@
           <div><label>ค่าใช้จ่าย (บาท)</label><input name="cost" type="number" step="any" value="${esc(r.cost || '')}"></div>
           <div><label>สถานะ</label><select name="status">${['reported', 'in_progress', 'done'].map((s) => `<option value="${s}" ${(r.status || 'done') === s ? 'selected' : ''}>${STATUS[s]}</option>`).join('')}</select></div>
         </div>
+        ${r.expenseId ? '<p class="muted" style="font-size:14px">บันทึกเป็นรายจ่ายแล้ว</p>' : `
+        <label class="row" style="color:var(--text);font-weight:400"><input type="checkbox" name="addExpense" style="width:auto"> บันทึกค่าใช้จ่ายนี้เป็นรายจ่ายของหอ</label>`}
+        ${r.chargeId ? '<p class="muted" style="font-size:14px">เรียกเก็บจากผู้เช่าแล้ว (ดูที่หน้าบิล)</p>' : `
+        <label class="row" style="color:var(--text);font-weight:400"><input type="checkbox" name="chargeTenant" id="chkCharge" style="width:auto"> เรียกเก็บจากผู้เช่า (ผู้เช่าทำเสียหาย)</label>
+        <div class="grid2 hidden" id="chargeBox">
+          <div><label>ยอดเรียกเก็บ (บาท)</label><input name="chargeAmount" type="number" step="any" value="${esc(r.cost || '')}"></div>
+          <div><label>รวมในบิลเดือน</label><input name="chargeMonth" type="month" value="${thisMonth()}"></div>
+        </div>`}
         <label>แนบรูป</label><input name="photos" type="file" accept="image/\x2a" multiple>
         ${(r.photoIds || []).length ? `<div class="thumbs">${r.photoIds.map((id, i) => `<button type="button" class="small ghost" data-file="${esc(id)}" data-title="รูปที่ ${i + 1}">รูปที่ ${i + 1}</button>`).join('')}</div>` : ''}
         <p><button type="submit">บันทึก</button></p>
       </form>`);
+    if ($('#chkCharge', b)) $('#chkCharge', b).onchange = (e) => $('#chargeBox', b).classList.toggle('hidden', !e.target.checked);
     $('#repForm', b).onsubmit = (e) => {
       e.preventDefault();
       const f = formData(e.target);
       delete f.photos;
       f.id = r.id || '';
+      f.addExpense = !!f.addExpense;
+      f.chargeTenant = !!f.chargeTenant;
       busy($('button[type=submit]', e.target), async () => {
         const photos = await readFiles($('[name=photos]', e.target));
         await api('apiSaveRepair', f, photos);
@@ -735,6 +860,107 @@
         closeModal();
         if (state.tab === 'repairs') adminRepairs();
         else loadAdmin();
+      });
+    };
+  }
+
+  // ---------- บัญชีรายรับ-รายจ่าย ----------
+  function adminAccounts(month) {
+    month = month || state.accMonth || thisMonth();
+    state.accMonth = month;
+    const year = month.slice(0, 4);
+    return swr('acc_' + month,
+      () => Promise.all([api('apiAccountMonth', month), api('apiAccountYear', year)]),
+      (r) => drawAccounts(month, r[0], r[1]));
+  }
+  function drawAccounts(month, d, yearRows) {
+    const max = Math.max(1, ...yearRows.map((m) => Math.max(m.income, m.expense)));
+    $('#view').innerHTML = `
+      ${sec('บัญชีรายรับ-รายจ่าย', `<input type="month" id="accMon" value="${month}" style="width:auto">
+        <button type="button" class="small" id="addIn">${ic('plus')} รายรับ</button>
+        <button type="button" class="small danger" id="addOut">${ic('plus')} รายจ่าย</button>`)}
+      <div class="acc-grid">
+        <div class="card"><div class="muted">รายรับ ${thMonth(month)}</div><b class="money-in">${fmt(d.income)}</b>
+          <div class="muted" style="font-size:13px">ค่าเช่า ${fmt(d.rentIncome)} · อื่น ๆ ${fmt(d.otherIncome)}</div></div>
+        <div class="card"><div class="muted">รายจ่าย</div><b class="money-out">${fmt(d.expense)}</b></div>
+        <div class="card"><div class="muted">คงเหลือ</div><b>${fmt(d.net)}</b></div>
+        <div class="card"><div class="muted">ค้างรับ</div><b>${fmt(d.outstanding)}</b>
+          <div class="muted" style="font-size:13px">${d.unpaidInvoices.length} ใบ</div></div>
+      </div>
+
+      <div class="card">
+        <div class="row spread"><strong>ปี ${Number(month.slice(0, 4)) + 543}</strong>
+          <span class="muted" style="font-size:13px"><span class="pill s-paid">รายรับ</span> <span class="pill s-unpaid">รายจ่าย</span></span></div>
+        <div class="bars">${yearRows.map((m) => `
+          <div class="m" title="${thMonth(m.month)}: รับ ${fmt(m.income)} จ่าย ${fmt(m.expense)}">
+            <div class="pair"><span class="in" style="height:${(m.income / max) * 96}px"></span><span class="out" style="height:${(m.expense / max) * 96}px"></span></div>
+            ${TH_M[Number(m.month.slice(5)) - 1]}
+          </div>`).join('')}</div>
+        <div class="scroll-x"><table style="margin-top:10px;font-size:14px">
+          <thead><tr><th>เดือน</th><th class="num">รายรับ</th><th class="num">รายจ่าย</th><th class="num">คงเหลือ</th></tr></thead>
+          <tbody>${yearRows.filter((m) => m.income || m.expense).map((m) => `<tr><td>${thMonth(m.month)}</td><td class="num money-in">${fmt(m.income)}</td><td class="num money-out">${fmt(m.expense)}</td><td class="num">${fmt(m.net)}</td></tr>`).join('') || '<tr><td colspan="4" class="muted">ยังไม่มีข้อมูล</td></tr>'}</tbody>
+        </table></div>
+      </div>
+
+      <h3>รายการบันทึก ${thMonth(month)}</h3>
+      <div class="card">${d.entries.length ? d.entries.map((e) => `
+        <div class="list-item row spread">
+          <div class="grow"><strong class="${e.type === 'income' ? 'money-in' : 'money-out'}">${e.type === 'income' ? '+' : '−'}${fmt(e.amount)}</strong> ${esc(e.category)}
+            <div class="muted" style="font-size:14px">${thDate(e.date)}${e.note ? ' · ' + esc(e.note) : ''}</div></div>
+          <div class="row">
+            ${e.fileId ? `<button type="button" class="small ghost" data-file="${esc(e.fileId)}" data-title="ใบเสร็จ">ใบเสร็จ</button>` : ''}
+            <button type="button" class="small ghost" data-editent="${esc(e.id)}">แก้ไข</button>
+            <button type="button" class="small ghost" data-delent="${esc(e.id)}">ลบ</button>
+          </div>
+        </div>`).join('') : '<span class="muted">ยังไม่มีรายการ</span>'}</div>
+
+      <h3>ค่าเช่าที่ได้รับ ${thMonth(month)}</h3>
+      <div class="card">${d.paidInvoices.length ? d.paidInvoices.map((i) => `
+        <div class="list-item row spread"><span>ห้อง ${esc(i.roomId)} · เลขที่ ${esc(i.number || '-')}${i.paidAt ? ' · ชำระ ' + thDate(i.paidAt) : ''}</span><strong class="money-in">${fmt(i.total)}</strong></div>`).join('') : '<span class="muted">ยังไม่มี</span>'}</div>
+
+      ${d.unpaidInvoices.length ? `<h3>ค้างชำระ</h3>
+      <div class="card">${d.unpaidInvoices.map((i) => `
+        <div class="list-item row spread"><span>ห้อง ${esc(i.roomId)} · เลขที่ ${esc(i.number || '-')} ${pill(i.status)}</span><strong>${fmt(i.total)}</strong></div>`).join('')}</div>` : ''}`;
+
+    $('#accMon').onchange = (e) => { if (e.target.value) { $('#view').innerHTML = '<div class="center muted">กำลังโหลด…</div>'; adminAccounts(e.target.value).catch(fail); } };
+    $('#addIn').onclick = () => entryForm({ type: 'income', date: month === thisMonth() ? today() : month + '-01' }, d.categories, month);
+    $('#addOut').onclick = () => entryForm({ type: 'expense', date: month === thisMonth() ? today() : month + '-01' }, d.categories, month);
+    $$('[data-editent]').forEach((b) => { b.onclick = () => entryForm(d.entries.find((x) => x.id === b.dataset.editent), d.categories, month); });
+    $$('[data-delent]').forEach((b) => {
+      b.onclick = () => {
+        if (!confirm('ลบรายการนี้?')) return;
+        busy(b, async () => { await api('apiDeleteEntry', b.dataset.delent); toast('ลบแล้ว'); adminAccounts(month); });
+      };
+    });
+  }
+
+  function entryForm(e, cats, month) {
+    const isIn = e.type === 'income';
+    const list = cats[e.type] || [];
+    const b = openModal(isIn ? 'บันทึกรายรับ' : 'บันทึกรายจ่าย', `
+      <form id="entForm">
+        <div class="grid2">
+          <div><label>วันที่</label><input name="date" type="date" value="${esc(e.date || today())}" required></div>
+          <div><label>จำนวนเงิน (บาท) *</label><input name="amount" type="number" step="any" value="${esc(e.amount || '')}" required></div>
+        </div>
+        <label>หมวด</label>
+        <select name="category">${list.map((c) => `<option ${c === e.category ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select>
+        <label>รายละเอียด</label><input name="note" value="${esc(e.note || '')}" placeholder="${isIn ? 'เช่น เงินประกันห้อง 201' : 'เช่น ค่าไฟส่วนกลาง ต.ค.'}">
+        <label>แนบใบเสร็จ (ไม่บังคับ)</label><input name="file" type="file" accept="image/\x2a,application/pdf">
+        <p><button type="submit" class="${isIn ? '' : 'danger'}">บันทึก</button></p>
+      </form>`);
+    $('#entForm', b).onsubmit = (ev) => {
+      ev.preventDefault();
+      const f = formData(ev.target);
+      delete f.file;
+      f.type = e.type;
+      f.id = e.id || '';
+      busy($('button[type=submit]', ev.target), async () => {
+        const [file] = await readFiles($('[name=file]', ev.target));
+        await api('apiSaveEntry', f, file || null);
+        closeModal();
+        toast('บันทึกแล้ว');
+        adminAccounts(f.date.slice(0, 7));
       });
     };
   }
@@ -779,9 +1005,9 @@
         </div>
       </form>
       <div class="card" style="margin-top:16px">
-        <div class="li"><span class="ic">${ic('file')}</span><div><strong>แม่แบบเอกสาร</strong><div class="muted" style="font-size:14px">แก้ข้อความได้ใน Google Docs โดยคงตัวแทน {{...}} ไว้</div></div></div>
+        <div class="li"><span class="ic">${ic('file')}</span><div><strong>แม่แบบเอกสาร</strong><div class="muted" style="font-size:14px">แก้หน้าตาได้ใน Google Sheets / Docs โดยคงตัวแทน {{...}} ไว้</div></div></div>
         <p class="row">
-          ${s.invoiceTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="${docUrl(s.invoiceTemplateId)}">แม่แบบใบแจ้งหนี้</a>` : ''}
+          ${s.invoiceTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https:\/\/docs.google.com/spreadsheets/d/${encodeURIComponent(s.invoiceTemplateId)}/edit">แม่แบบใบแจ้งหนี้</a>` : ''}
           ${s.contractTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="${docUrl(s.contractTemplateId)}">แม่แบบสัญญาเช่า</a>` : ''}
           ${s.rootFolderId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https:\/\/drive.google.com/drive/folders/${encodeURIComponent(s.rootFolderId)}">โฟลเดอร์ Drive</a>` : ''}
         </p>

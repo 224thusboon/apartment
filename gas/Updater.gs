@@ -10,7 +10,7 @@
 const GITHUB_REPO = '224thusboon/apartment';
 const GAS_FILES = [
   'appsscript.json', 'Code.gs', 'Config.gs', 'Firestore.gs', 'Auth.gs', 'Rooms.gs',
-  'Billing.gs', 'Documents.gs', 'Payments.gs', 'Repairs.gs', 'Updater.gs',
+  'Billing.gs', 'Invoice.gs', 'Documents.gs', 'Payments.gs', 'Repairs.gs', 'Accounts.gs', 'Updater.gs',
   'Index.html', 'Styles.html', 'App.html',
 ];
 

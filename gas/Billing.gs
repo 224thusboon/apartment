@@ -21,8 +21,11 @@ function monthSheet_(month) {
     { where: [COL.READINGS, { month: prev }] },
     { where: [COL.READINGS, { month: month }] },
     { where: [COL.INVOICES, { month: month }] },
+    { where: [COL.CHARGES, { month: month }] },
   ]);
   const rooms = r[0];
+  const charges = {};
+  r[5].forEach(function (c) { (charges[c.roomId] = charges[c.roomId] || []).push(c); });
   const tenancies = {};
   r[1].forEach(function (t) { tenancies[t.id] = t; });
   const readings = {};
@@ -48,7 +51,7 @@ function monthSheet_(month) {
   rows.sort(function (a, b) { return Number(a.roomId) - Number(b.roomId); });
   const roomsById = {};
   rooms.forEach(function (x) { roomsById[x.id] = x; });
-  return { rows: rows, rooms: roomsById, tenancies: tenancies, invoices: invoices };
+  return { rows: rows, rooms: roomsById, tenancies: tenancies, invoices: invoices, charges: charges };
 }
 
 /** rows: [{roomId, water, electric}] */
@@ -66,7 +69,7 @@ function apiSaveReadings(token, month, rows) {
 }
 
 /** คำนวณรายการในบิล (ใช้ได้ทั้งพรีวิวและออกจริง) */
-function calcInvoice_(settings, room, tenancy, prevR, curR, month) {
+function calcInvoice_(settings, room, tenancy, prevR, curR, month, extra) {
   const wUnits = Math.max(0, curR.water - prevR.water);
   const eUnits = Math.max(0, curR.electric - prevR.electric);
   const wAmt = Math.max(wUnits * settings.waterRate, settings.waterMinCharge || 0);
@@ -85,6 +88,11 @@ function calcInvoice_(settings, room, tenancy, prevR, curR, month) {
   (settings.otherFees || []).forEach(function (f) {
     const a = Number(f.amount) || 0;
     items.push({ name: f.name, qty: 1, price: a, amount: a, detail: '' });
+  });
+  // รายการเรียกเก็บเพิ่มของห้องนี้ในเดือนนี้ (เช่น ค่าซ่อม)
+  (extra || []).forEach(function (c) {
+    const q = Number(c.qty) || 1, p = Number(c.price) || 0;
+    items.push({ name: c.name, qty: q, price: p, amount: round2_(q * p), detail: c.note || '', chargeId: c.id });
   });
   const total = items.reduce(function (s, i) { return s + i.amount; }, 0);
   return { items: items, total: total, waterUnits: wUnits, electricUnits: eUnits };
@@ -120,9 +128,10 @@ function apiGenerateInvoices(token, month) {
       if (!tenancy) return { roomId: row.roomId, ok: false, error: 'ไม่พบข้อมูลผู้เช่า' };
       const calc = calcInvoice_(settings, room, tenancy,
         { water: row.prevWater, electric: row.prevElectric },
-        { water: row.water, electric: row.electric }, month);
+        { water: row.water, electric: row.electric }, month, ms.charges[row.roomId]);
       const id = row.roomId + '_' + month;
-      const old = ms.invoices[row.roomId];
+      let old = ms.invoices[row.roomId];
+      if (old && old.status === 'cancelled') old = null; // ใบที่ยกเลิกแล้ว ออกใบใหม่เลขใหม่
       if (old && old.pdfFileId) {
         try { DriveApp.getFileById(old.pdfFileId).setTrashed(true); } catch (e) { /* ไฟล์อาจถูกลบไปแล้ว */ }
       }
@@ -170,5 +179,81 @@ function apiListInvoices(token, month) {
 function apiSetInvoiceStatus(token, invoiceId, status) {
   requireSession_(token, 'admin');
   if (['unpaid', 'pending', 'paid'].indexOf(status) < 0) throw new Error('สถานะไม่ถูกต้อง');
-  return fsUpdate_(COL.INVOICES, invoiceId, { status: status });
+  return fsUpdate_(COL.INVOICES, invoiceId, { status: status, paidAt: status === 'paid' ? today_() : '' });
+}
+
+function round2_(n) { return Math.round(Number(n) * 100) / 100; }
+
+/**
+ * แก้ใบแจ้งหนี้: เลขที่ และรายการ (ชื่อ/จำนวน/ราคา) แล้วออก PDF ใหม่
+ * data: {number, items:[{name, qty, price}]}
+ */
+function apiUpdateInvoice(token, invoiceId, data) {
+  requireSession_(token, 'admin');
+  const inv = fsGet_(COL.INVOICES, invoiceId);
+  if (!inv) throw new Error('ไม่พบใบแจ้งหนี้');
+  if (inv.status === 'cancelled') throw new Error('ใบนี้ยกเลิกแล้ว แก้ไขไม่ได้');
+  const number = String(data.number || '').trim();
+  if (!number) throw new Error('กรุณาใส่เลขที่ใบแจ้งหนี้');
+  if (number !== inv.number) {
+    const dup = fsWhere_(COL.INVOICES, { number: number }).filter(function (x) { return x.id !== invoiceId && x.status !== 'cancelled'; });
+    if (dup.length) throw new Error('เลขที่ ' + number + ' ซ้ำกับห้อง ' + dup[0].roomId + ' เดือน ' + dup[0].month);
+  }
+  const items = (data.items || []).filter(function (i) { return i && String(i.name || '').trim(); }).map(function (i) {
+    const q = Number(i.qty) || 0, p = Number(i.price) || 0;
+    return { name: String(i.name).trim(), qty: q, price: p, amount: round2_(q * p), detail: i.detail || '' };
+  });
+  if (!items.length) throw new Error('ต้องมีอย่างน้อย 1 รายการ');
+  const settings = getSettings_();
+  const upd = Object.assign({}, inv, { number: number, items: items, total: round2_(items.reduce(function (s, i) { return s + i.amount; }, 0)) });
+  if (inv.pdfFileId) {
+    try { DriveApp.getFileById(inv.pdfFileId).setTrashed(true); } catch (e) { /* ไม่มีไฟล์ */ }
+  }
+  upd.pdfFileId = renderInvoicePdf_(settings, upd);
+  delete upd.id;
+  fsSet_(COL.INVOICES, invoiceId, upd);
+  return true;
+}
+
+/**
+ * ยกเลิกใบแจ้งหนี้: ย้ายไปเก็บเป็นประวัติ (id ใหม่) สถานะ cancelled
+ * ห้องนั้นออกใบใหม่ของเดือนเดียวกันได้ (ได้เลขที่ใหม่)
+ */
+function apiCancelInvoice(token, invoiceId, reason) {
+  requireSession_(token, 'admin');
+  const inv = fsGet_(COL.INVOICES, invoiceId);
+  if (!inv) throw new Error('ไม่พบใบแจ้งหนี้');
+  if (inv.status === 'paid') throw new Error('ใบนี้ชำระแล้ว ถ้าจะยกเลิกให้เปลี่ยนสถานะเป็นค้างชำระก่อน');
+  const keep = Object.assign({}, inv, {
+    status: 'cancelled', cancelReason: reason || '', cancelledAt: today_(), originalId: invoiceId,
+  });
+  delete keep.id;
+  fsSet_(COL.INVOICES, invoiceId + '_x' + Date.now(), keep);
+  fsDelete_(COL.INVOICES, invoiceId);
+  return true;
+}
+
+// ---------- รายการเรียกเก็บเพิ่มรายห้อง ----------
+
+/** data: {roomId, month, name, qty, price, note} */
+function apiAddCharge(token, data) {
+  requireSession_(token, 'admin');
+  if (!data.roomId || !data.month || !String(data.name || '').trim()) throw new Error('กรุณาระบุห้อง เดือน และชื่อรายการ');
+  const q = Number(data.qty) || 1, p = Number(data.price) || 0;
+  return fsSet_(COL.CHARGES, null, {
+    roomId: String(data.roomId), month: data.month, name: String(data.name).trim(),
+    qty: q, price: p, amount: round2_(q * p), note: data.note || '', repairId: data.repairId || '',
+    createdAt: today_(),
+  });
+}
+
+function apiDeleteCharge(token, chargeId) {
+  requireSession_(token, 'admin');
+  fsDelete_(COL.CHARGES, chargeId);
+  return true;
+}
+
+function apiListCharges(token, month) {
+  requireSession_(token, 'admin');
+  return sortBy_(fsWhere_(COL.CHARGES, { month: month }), 'roomId');
 }
