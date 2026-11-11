@@ -19,7 +19,8 @@ function createInvoiceTemplate_(folder) {
   b.setMarginTop(36).setMarginBottom(36).setMarginLeft(36).setMarginRight(36);
 
   const title = b.getParagraphs()[0];
-  title.setText('ใบแจ้งหนี้').setAlignment(A.RIGHT);
+  title.setText('ใบแจ้งหนี้');
+  title.setAlignment(A.RIGHT);
   title.editAsText().setBold(true).setFontSize(16);
   b.appendParagraph('{{dormAddress}}');
   b.appendParagraph('');
