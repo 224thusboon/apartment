@@ -508,6 +508,14 @@
       <h3 class="row spread">ประวัติซ่อม/เปลี่ยนอะไหล่ <button type="button" class="small" id="btnAddRepair">+ เพิ่ม</button></h3>
       <div class="card">${d.repairs.length ? d.repairs.map(repairRow).join('') : '<span class="muted">ยังไม่มีประวัติ</span>'}</div>
 
+      <h3 class="row spread">รายการเรียกเก็บเพิ่มของห้องนี้ ${cur ? `<button type="button" class="small" id="btnCharge2">${ic('plus')} เพิ่ม</button>` : ''}</h3>
+      <div class="card">${(d.charges || []).length ? d.charges.map((c) => `
+        <div class="list-item row spread">
+          <div class="grow">${esc(c.name)} <span class="muted">· บิลเดือน ${thMonth(c.month)}</span>
+            <div class="muted" style="font-size:14px">${fmtQ(c.qty)} × ${fmt(c.price)} = ${fmt(c.amount)} บาท${c.note ? ' · ' + esc(c.note) : ''}</div></div>
+          <button type="button" class="small ghost" data-delcharge2="${esc(c.id)}">ลบ</button>
+        </div>`).join('') : '<span class="muted">ไม่มี</span>'}</div>
+
       <h3>ใบแจ้งหนี้</h3>
       <div class="card">${d.invoices.length ? d.invoices.map((i) => `
         <div class="list-item row spread">
@@ -525,6 +533,12 @@
       busy($('button[type=submit]', e.target), async () => { await api('apiSaveRoom', f); toast('บันทึกแล้ว'); refresh(); });
     };
     $('#btnAddRepair', body).onclick = () => repairForm({ roomId });
+    $$('[data-delcharge2]', body).forEach((b) => {
+      b.onclick = () => {
+        if (!confirm('ลบรายการนี้?')) return;
+        busy(b, async () => { await api('apiDeleteCharge', b.dataset.delcharge2); toast('ลบแล้ว'); openRoom(roomId); });
+      };
+    });
     $$('[data-repair]', body).forEach((el) => {
       el.onclick = () => repairForm(d.repairs.find((x) => x.id === el.dataset.repair));
     });
@@ -537,7 +551,8 @@
           <p class="row"><button type="button" data-file="${esc(res.pdfId)}" data-title="สัญญาเช่า">ดู PDF</button>
           <a class="btn ghost" href="${esc(res.docUrl)}" target="_blank" rel="noopener">แก้ไขใน Google Docs</a></p>`);
       });
-      $('#btnCharge', body).onclick = () => chargeForm({ roomId });
+      $('#btnCharge', body).onclick = () => chargeForm({ roomId, reopenRoom: true });
+      $('#btnCharge2', body).onclick = () => chargeForm({ roomId, reopenRoom: true });
       $('#btnPin', body).onclick = (e) => {
         if (!confirm('ออก PIN ใหม่? PIN เดิมจะใช้ไม่ได้ทันที')) return;
         busy(e.target, async () => showPin(roomId, (await api('apiResetPin', roomId)).pin));
@@ -594,12 +609,20 @@
   function drawBilling(month, rows, invoices, charges) {
     const active = invoices.filter((i) => i.status !== 'cancelled');
     const cancelled = invoices.filter((i) => i.status === 'cancelled');
+    const byRoom = {};
+    charges.forEach((c) => { (byRoom[c.roomId] = byRoom[c.roomId] || []).push(c); });
+    const chargeCell = (roomId) => `
+      <div class="charges">${(byRoom[roomId] || []).map((c) => `
+        <span class="chip-charge">${esc(c.name)} ${fmt(c.amount)}
+          <button type="button" class="x" data-delcharge="${esc(c.id)}" aria-label="ลบ ${esc(c.name)}">×</button></span>`).join('')}
+        <button type="button" class="small ghost" data-addcharge="${esc(roomId)}">${ic('plus')} เพิ่ม</button>
+      </div>`;
     $('#view').innerHTML = `
       ${sec(`จดมิเตอร์ ${thMonth(month)}`, `<input type="month" id="mon" value="${month}" style="width:auto">`)}
-      <p class="muted" style="font-size:14px;margin-top:-6px">กรอกเลขมิเตอร์สิ้นเดือน หน่วยที่ใช้คิดจากเลขเดือนก่อน</p>
+      <p class="muted" style="font-size:14px;margin-top:-6px">กรอกเลขมิเตอร์สิ้นเดือน หน่วยที่ใช้คิดจากเลขเดือนก่อน · รายการเพิ่ม (เช่น ค่าซ่อม) ของแต่ละห้องจะรวมเข้าบิลห้องนั้นเดือนนี้</p>
       <div class="card scroll-x">
         ${rows.length ? `<table id="meter">
-          <thead><tr><th>ห้อง</th><th class="num">${ic('drop')} น้ำ (ก่อน)</th><th>น้ำ (ล่าสุด)</th><th class="num">${ic('bolt')} ไฟ (ก่อน)</th><th>ไฟ (ล่าสุด)</th><th>บิล</th></tr></thead>
+          <thead><tr><th>ห้อง</th><th class="num">${ic('drop')} น้ำ (ก่อน)</th><th>น้ำ (ล่าสุด)</th><th class="num">${ic('bolt')} ไฟ (ก่อน)</th><th>ไฟ (ล่าสุด)</th><th>รายการเพิ่ม</th><th>บิล</th></tr></thead>
           <tbody>${rows.map((r) => `
             <tr data-room="${esc(r.roomId)}">
               <td><strong>${esc(r.roomId)}</strong><div class="muted" style="font-size:13px">${esc(r.tenantName)}</div></td>
@@ -607,6 +630,7 @@
               <td><input name="water" type="number" step="any" inputmode="decimal" value="${esc(r.water)}"></td>
               <td class="num">${fmt(r.prevElectric)}</td>
               <td><input name="electric" type="number" step="any" inputmode="decimal" value="${esc(r.electric)}"></td>
+              <td>${chargeCell(r.roomId)}</td>
               <td>${r.invoiceStatus ? pill(r.invoiceStatus) : '<span class="muted">-</span>'}</td>
             </tr>`).join('')}</tbody></table>` : '<p class="muted">ยังไม่มีห้องที่มีผู้เช่า</p>'}
       </div>
@@ -615,15 +639,6 @@
         <button type="button" id="genInv">${ic('bill')} บันทึก + ออกใบแจ้งหนี้</button>
       </div>
       <div id="genResult" style="margin-top:12px"></div>
-
-      ${sec(`รายการเรียกเก็บเพิ่ม ${thMonth(month)}`, `<button type="button" class="small" id="addCharge">${ic('plus')} เพิ่ม</button>`)}
-      <p class="muted" style="font-size:14px;margin-top:-6px">เช่น ค่าซ่อมที่ผู้เช่าทำเสียหาย จะรวมเข้าใบแจ้งหนี้ของห้องนั้นตอนกดออกใบแจ้งหนี้</p>
-      <div class="card">${charges.length ? charges.map((c) => `
-        <div class="list-item row spread">
-          <div class="grow"><strong>ห้อง ${esc(c.roomId)}</strong> · ${esc(c.name)}
-            <div class="muted" style="font-size:14px">${fmtQ(c.qty)} × ${fmt(c.price)} = ${fmt(c.amount)} บาท${c.note ? ' · ' + esc(c.note) : ''}</div></div>
-          <button type="button" class="small ghost" data-delcharge="${esc(c.id)}">ลบ</button>
-        </div>`).join('') : '<span class="muted">ไม่มี</span>'}</div>
 
       ${sec(`ใบแจ้งหนี้ ${thMonth(month)}`)}
       <div class="card">${active.length ? active.map((i) => `
@@ -664,7 +679,7 @@
         try { await api('apiSetInvoiceStatus', sel.dataset.inv, sel.value); toast('อัปเดตสถานะแล้ว'); adminBilling(month); } catch (e) { fail(e); }
       };
     });
-    $('#addCharge').onclick = () => chargeForm({ month });
+    $$('[data-addcharge]').forEach((b) => { b.onclick = () => chargeForm({ month, roomId: b.dataset.addcharge }); });
     $$('[data-delcharge]').forEach((b) => {
       b.onclick = () => {
         if (!confirm('ลบรายการนี้?')) return;
@@ -727,7 +742,7 @@
   async function chargeForm(pre) {
     if (!state.admin) { try { await loadAdmin(); } catch (e) { return fail(e); } }
     const rooms = ((state.admin && state.admin.rooms) || []).filter((r) => r.status === 'occupied');
-    const b = openModal('เพิ่มรายการเรียกเก็บ', `
+    const b = openModal('เพิ่มรายการเรียกเก็บ' + (pre.roomId ? ' ห้อง ' + pre.roomId : ''), `
       <form id="chgForm">
         <div class="grid2">
           <div><label>ห้อง</label><select name="roomId" required>${rooms.map((r) => `<option value="${esc(r.id)}" ${r.id === pre.roomId ? 'selected' : ''}>${esc(r.number)} ${esc(r.tenantName)}</option>`).join('')}</select></div>
@@ -748,8 +763,9 @@
       busy($('button[type=submit]', e.target), async () => {
         await api('apiAddCharge', f);
         closeModal();
-        toast('เพิ่มแล้ว จะรวมในใบแจ้งหนี้เดือน ' + thMonth(f.month));
-        if (state.tab === 'billing') adminBilling(state.billMonth);
+        toast('เพิ่มแล้ว จะรวมในใบแจ้งหนี้ห้อง ' + f.roomId + ' เดือน ' + thMonth(f.month));
+        if (pre.reopenRoom) openRoom(f.roomId);
+        else if (state.tab === 'billing') adminBilling(state.billMonth);
       });
     };
   }

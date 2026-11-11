@@ -33,12 +33,14 @@ function apiRoomDetail(token, roomId) {
     { where: [COL.TENANCIES, { roomId: roomId }] },
     { where: [COL.REPAIRS, { roomId: roomId }] },
     { where: [COL.INVOICES, { roomId: roomId }] },
+    { where: [COL.CHARGES, { roomId: roomId }] },
   ]);
   return {
     room: r[0],
     tenancies: sortBy_(r[1], 'moveIn', true),
     repairs: sortBy_(r[2], 'date', true),
-    invoices: sortBy_(r[3], 'month', true),
+    invoices: sortBy_(r[3].filter(function (i) { return i.status !== 'cancelled'; }), 'month', true),
+    charges: sortBy_(r[4], 'month', true),
   };
 }
 

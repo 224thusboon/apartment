@@ -177,6 +177,12 @@
   .s-unpaid, .s-rejected { color: var(--bad); }
   .s-vacant, .s-ended, .s-cancelled { color: var(--muted); }
   details summary { cursor: pointer; padding: 2px 0; }
+  .charges { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; min-width: 160px; }
+  .chip-charge { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; padding: 2px 4px 2px 10px;
+    border-radius: 999px; background: var(--accent-soft); white-space: nowrap; }
+  .chip-charge .x { border: 0; background: none; color: var(--muted); padding: 0 6px; font-size: 16px; line-height: 1; box-shadow: none; }
+  .chip-charge .x:hover { color: var(--bad); box-shadow: none; }
+  #meter td input { min-width: 80px; max-width: 120px; }
   .money-in { color: var(--ok); }
   .money-out { color: var(--bad); }
   .acc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
