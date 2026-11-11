@@ -417,26 +417,39 @@
           <div class="stat"><span class="ic">${ic('users')}</span><div><b>${occ}/${d.rooms.length}</b><span>ห้องมีผู้เช่า</span></div></div>
           <div class="stat"><span class="ic">${ic('door')}</span><div><b>${vacant}</b><span>ห้องว่าง</span></div></div>
           <div class="stat"><span class="ic">${ic('card')}</span><div><b>${d.pendingPayments}</b><span>สลิปรอตรวจ</span></div></div>
-          <div class="stat"><span class="ic">${ic('check')}</span><div><b>${pct}%</b><span>อัตราการเข้าพัก</span></div></div>
+          <div class="stat${d.overdueRooms ? ' stat-bad' : ''}"><span class="ic">${ic('bill')}</span><div><b>${d.overdueRooms || 0}</b><span>ห้องค้างเกินกำหนด</span></div></div>
         </div>
       </section>
+      ${d.overdueRooms ? `<div class="card li alert-bad"><span class="ic">${ic('bill')}</span>
+        <div class="grow"><strong>${d.overdueRooms} ห้องค้างชำระเกินกำหนด รวม ${fmt(d.overdueTotal)} บาท</strong>
+          <div style="font-size:14px">${d.rooms.filter((r) => r.due && r.due.overdue > 0).map((r) => `ห้อง ${esc(r.number)} (${r.due.overdueDays} วัน)`).join(' · ')}</div></div>
+        <button type="button" class="small danger" id="showOverdue">ดูห้อง</button></div>` : ''}
       ${sec('ห้องทั้งหมด', `
         <div class="filters">
-          ${[['all', 'ทั้งหมด'], ['occupied', 'มีผู้เช่า'], ['vacant', 'ว่าง'], ['maintenance', 'ปิดปรับปรุง']].map(([k, l]) => `<button type="button" class="small ${filter === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
+          ${[['all', 'ทั้งหมด'], ['occupied', 'มีผู้เช่า'], ['vacant', 'ว่าง'], ['overdue', 'ค้างชำระ'], ['maintenance', 'ปิดปรับปรุง']].map(([k, l]) => `<button type="button" class="small ${filter === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
         </div>`)}
       <div class="rooms">
-        ${d.rooms.filter((r) => filter === 'all' || r.status === filter).map((r) => `
-          <button type="button" class="room ${esc(r.status)}" data-room="${esc(r.id)}">
+        ${d.rooms.filter((r) => filter === 'all' || (filter === 'overdue' ? r.due && r.due.unpaid > 0 : r.status === filter)).map((r) => {
+          const du = r.due;
+          const late = du && du.overdue > 0;
+          const tag = late ? `<span class="pill s-unpaid">ค้าง ${fmt(du.overdue)} · เกิน ${du.overdueDays} วัน</span>`
+            : du && du.unpaid > 0 ? `<span class="pill s-ended">รอชำระ ${fmt(du.unpaid)}</span>`
+            : du && du.pending ? '<span class="pill s-pending">รอตรวจสลิป</span>' : '';
+          return `
+          <button type="button" class="room ${esc(r.status)}${late ? ' late' : ''}" data-room="${esc(r.id)}">
             <div class="room-top"><span class="no">${esc(r.number)}</span><span class="ic">${ic(r.status === 'occupied' ? 'user' : r.status === 'maintenance' ? 'wrench' : 'door')}</span></div>
             <div class="who">${r.tenantName ? esc(r.tenantName) : '<span class="muted">—</span>'}</div>
             <div class="row spread"><span class="meta">${fmt(r.rent)} ฿/เดือน</span>${pill(r.status)}</div>
-          </button>`).join('') || '<div class="muted">ไม่มีห้องในกลุ่มนี้</div>'}
+            ${tag ? `<div>${tag}</div>` : ''}
+          </button>`;
+        }).join('') || '<div class="muted">ไม่มีห้องในกลุ่มนี้</div>'}
       </div>
       ${d.openRepairs ? `<div class="card li" style="margin-top:16px"><span class="ic">${ic('wrench')}</span><div class="grow"><strong>งานซ่อมค้าง ${d.openRepairs} รายการ</strong></div><button type="button" class="small ghost" id="hGoRep">ดู</button></div>` : ''}`;
     $('.rooms').onclick = (e) => { const b = e.target.closest('[data-room]'); if (b) openRoom(b.dataset.room); };
     $('.filters').onclick = (e) => { const b = e.target.closest('[data-f]'); if (b) { state.roomFilter = b.dataset.f; adminRooms(true); } };
     $('#hGoBill').onclick = () => go('billing');
     $('#hGoPay').onclick = () => go('payments');
+    if ($('#showOverdue')) $('#showOverdue').onclick = () => { state.roomFilter = 'overdue'; adminRooms(true); };
     if ($('#hGoRep')) $('#hGoRep').onclick = () => go('repairs');
   }
 

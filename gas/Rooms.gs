@@ -11,19 +11,43 @@ function apiAdminBootstrap(token) {
     { where: [COL.TENANCIES, { status: 'active' }] },
     { where: [COL.PAYMENTS, { status: 'pending' }] },
     { list: COL.REPAIRS },
+    { where: [COL.INVOICES, { status: 'unpaid' }] },
+    { where: [COL.INVOICES, { status: 'pending' }] },
   ]);
   const rooms = r[0], tenancies = r[1];
   const byId = {};
   tenancies.forEach(function (t) { byId[t.id] = t; });
-  rooms.forEach(function (r) {
-    const t = byId[r.currentTenancyId];
-    r.tenantName = t ? t.tenantName : '';
-    r.moveIn = t ? t.moveIn : '';
+
+  // ยอดค้างต่อห้อง: ค้างชำระ (unpaid) และ รอตรวจสลิป (pending)
+  const today = today_();
+  const due = {};
+  r[4].concat(r[5]).forEach(function (i) {
+    const d = due[i.roomId] = due[i.roomId] || { unpaid: 0, unpaidCount: 0, overdue: 0, overdueDays: 0, pending: 0 };
+    if (i.status === 'pending') { d.pending += 1; return; }
+    d.unpaid = round2_(d.unpaid + (Number(i.total) || 0));
+    d.unpaidCount += 1;
+    if (i.dueDate && i.dueDate < today) {
+      d.overdue = round2_(d.overdue + (Number(i.total) || 0));
+      const days = Math.floor((new Date(today) - new Date(i.dueDate)) / 864e5);
+      d.overdueDays = Math.max(d.overdueDays, days);
+    }
+  });
+
+  rooms.forEach(function (x) {
+    const t = byId[x.currentTenancyId];
+    x.tenantName = t ? t.tenantName : '';
+    x.moveIn = t ? t.moveIn : '';
+    x.due = due[x.id] || null;
   });
   rooms.sort(function (a, b) { return Number(a.number) - Number(b.number); });
   const pendingPayments = r[2].length;
   const openRepairs = r[3].filter(function (x) { return x.status !== 'done'; }).length;
-  return { settings: settings, rooms: rooms, pendingPayments: pendingPayments, openRepairs: openRepairs };
+  const overdueRooms = rooms.filter(function (x) { return x.due && x.due.overdue > 0; });
+  return {
+    settings: settings, rooms: rooms, pendingPayments: pendingPayments, openRepairs: openRepairs,
+    overdueRooms: overdueRooms.length,
+    overdueTotal: round2_(overdueRooms.reduce(function (s, x) { return s + x.due.overdue; }, 0)),
+  };
 }
 
 function apiRoomDetail(token, roomId) {

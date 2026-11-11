@@ -163,6 +163,12 @@
   .room::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 4px; background: var(--line); }
   .room.occupied::before { background: var(--accent); }
   .room.maintenance::before { background: var(--warn); }
+  .room.late { border-color: var(--bad); box-shadow: 0 0 0 1px var(--bad), var(--shadow); }
+  .room.late::before { background: var(--bad); }
+  .room .pill { white-space: normal; }
+  .alert-bad { border-color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, var(--card)); }
+  .alert-bad .ic { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
+  .stat.stat-bad .ic { background: var(--bad); }
   .room-top { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
   .room .no { font-family: var(--head); font-weight: 600; font-size: 24px; line-height: 1; }
   .room .ic { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
