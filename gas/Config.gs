@@ -53,6 +53,7 @@ const DEFAULT_SETTINGS = {
   pdfFolderId: '',
   photoFolderId: '',
   backupFolderId: '',
+  signedFolderId: '',    // โฟลเดอร์สัญญาที่เซ็นแล้ว (สร้างเองเมื่ออัปโหลดครั้งแรก)
 };
 
 function prop_(key) {

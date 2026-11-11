@@ -89,7 +89,10 @@ function apiTenantHome(token) {
   return {
     settings: publicSettings_(getSettings_()),
     roomId: s.roomId,
-    tenancy: { tenantName: t.tenantName, moveIn: t.moveIn, rent: t.rent, contractFileId: t.contractFileId || '' },
+    tenancy: {
+      tenantName: t.tenantName, moveIn: t.moveIn, rent: t.rent, contractFileId: t.contractFileId || '',
+      signedContracts: (t.signedContracts || []).map(function (c) { return { fileId: c.fileId, name: c.name, uploadedAt: c.uploadedAt }; }),
+    },
     invoices: invoices,
     payments: payments,
     repairs: repairs,

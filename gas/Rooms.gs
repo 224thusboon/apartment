@@ -126,8 +126,9 @@ function apiMoveOut(token, data) {
   const room = fsGet_(COL.ROOMS, data.roomId);
   if (!room || !room.currentTenancyId) throw new Error('ห้องนี้ไม่มีผู้เช่า');
   const tenancyId = room.currentTenancyId;
+  const moveOut = data.moveOut || today_();
   fsUpdate_(COL.TENANCIES, tenancyId, {
-    moveOut: data.moveOut || today_(),
+    moveOut: moveOut,
     status: 'ended',
     note: data.note || '',
     pinHash: '', // ปิดการเข้าระบบ
