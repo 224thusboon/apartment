@@ -16,7 +16,7 @@ function createInvoiceTemplate_(folder) {
   const A = DocumentApp.HorizontalAlignment;
   const doc = DocumentApp.create('แม่แบบ - ใบแจ้งหนี้');
   const b = doc.getBody();
-  b.setMarginTop(36).setMarginBottom(36).setMarginLeft(36).setMarginRight(36);
+  b.setMarginTop(28).setMarginBottom(28).setMarginLeft(36).setMarginRight(36);
 
   const title = b.getParagraphs()[0];
   title.setText('ใบแจ้งหนี้');
@@ -34,7 +34,7 @@ function createInvoiceTemplate_(folder) {
   ]);
   info.setColumnWidth(0, 373).setColumnWidth(1, 150);
   for (let r = 0; r < info.getNumRows(); r++) {
-    info.getRow(r).setMinimumHeight(36);
+    info.getRow(r).setMinimumHeight(28);
   }
 
   b.appendParagraph('');
@@ -51,12 +51,12 @@ function createInvoiceTemplate_(folder) {
     const align = c === 1 ? A.LEFT : c === 0 ? A.RIGHT : A.RIGHT;
     items.getRow(1).getCell(c).getChild(0).asParagraph().setAlignment(align);
   }
-  items.getRow(1).setMinimumHeight(24);
+  items.getRow(1).setMinimumHeight(20);
 
   // ข้อความแจ้งผู้เช่า (อยู่ในกรอบต่อจากตารางรายการ)
   const notes = b.appendTable([['', '{{notes}}']]);
   notes.setColumnWidth(0, 40).setColumnWidth(1, 483);
-  notes.getRow(0).setMinimumHeight(150);
+  notes.getRow(0).setMinimumHeight(100);
 
   // ยอดรวม
   const tot = b.appendTable([
@@ -76,6 +76,16 @@ function createInvoiceTemplate_(folder) {
 
   b.editAsText().setFontFamily('Sarabun').setFontSize(11);
   title.editAsText().setFontSize(16);
+  // ตัดระยะห่างย่อหน้า และย่อบรรทัดว่างคั่นตาราง ให้ทั้งใบอยู่ในหน้าเดียว
+  b.getParagraphs().forEach(function (p) {
+    p.setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1);
+  });
+  for (let i = 0; i < b.getNumChildren(); i++) {
+    const ch = b.getChild(i);
+    if (ch.getType() === DocumentApp.ElementType.PARAGRAPH && ch.asParagraph().getText() === '') {
+      ch.asParagraph().editAsText().setFontSize(6);
+    }
+  }
   doc.saveAndClose();
   DriveApp.getFileById(doc.getId()).moveTo(folder);
   return doc.getId();
@@ -177,7 +187,7 @@ function fillItemRows_(body, items) {
   const row = el.asTableRow();
   const table = row.getParentTable();
   const start = table.getChildIndex(row);
-  const MIN_ROWS = 6;
+  const MIN_ROWS = 5;
   const n = Math.max(items.length, MIN_ROWS);
   for (let k = 0; k < n; k++) {
     const it = items[k];
