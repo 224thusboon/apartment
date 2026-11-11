@@ -22,7 +22,15 @@ function newSession_(role, roomId, tenantId) {
 /** คืนข้อมูล session หรือ throw ถ้าไม่ผ่าน */
 function requireSession_(token, role) {
   if (!token) throw new Error('AUTH: กรุณาเข้าสู่ระบบ');
-  const s = fsGet_(COL.SESSIONS, hash_(token));
+  const key = hash_(token);
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('sess_' + key);
+  let s = hit ? JSON.parse(hit) : null;
+  if (!s) {
+    s = fsGet_(COL.SESSIONS, key);
+    // เก็บในแคชสูงสุด 6 ชม. (ขีดจำกัดของ CacheService) จะได้ไม่ต้องถาม Firestore ทุกครั้ง
+    if (s) cache.put('sess_' + key, JSON.stringify(s), 21600);
+  }
   if (!s || new Date(s.expiresAt) < new Date()) throw new Error('AUTH: เซสชันหมดอายุ กรุณาเข้าสู่ระบบใหม่');
   if (role && s.role !== role) throw new Error('AUTH: ไม่มีสิทธิ์ใช้งานส่วนนี้');
   return s;
@@ -51,7 +59,10 @@ function apiLogin(payload) {
 }
 
 function apiLogout(token) {
-  if (token) fsDelete_(COL.SESSIONS, hash_(token));
+  if (token) {
+    CacheService.getScriptCache().remove('sess_' + hash_(token));
+    fsDelete_(COL.SESSIONS, hash_(token));
+  }
   return true;
 }
 

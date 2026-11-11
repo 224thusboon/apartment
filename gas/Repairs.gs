@@ -50,14 +50,20 @@ function apiReportRepair(token, data, photos) {
 /** หน้าหลักผู้เช่า */
 function apiTenantHome(token) {
   const s = requireSession_(token, 'tenant');
-  const room = fsGet_(COL.ROOMS, s.roomId);
-  const t = room && room.currentTenancyId ? fsGet_(COL.TENANCIES, room.currentTenancyId) : null;
-  if (!t || t.tenantId !== s.tenantId) throw new Error('AUTH: สิทธิ์การเข้าพักสิ้นสุดแล้ว');
-  const invoices = fsWhere_(COL.INVOICES, { tenancyId: t.id }, { field: 'month', dir: 'DESCENDING' });
-  const payments = fsWhere_(COL.PAYMENTS, { roomId: s.roomId })
+  // อ่านทุกอย่างของห้องนี้พร้อมกันในรอบเดียว
+  const r = fsMulti_([
+    { where: [COL.TENANCIES, { roomId: s.roomId, status: 'active' }] },
+    { where: [COL.INVOICES, { roomId: s.roomId }] },
+    { where: [COL.PAYMENTS, { roomId: s.roomId }] },
+    { where: [COL.REPAIRS, { roomId: s.roomId }] },
+  ]);
+  const t = r[0].filter(function (x) { return x.tenantId === s.tenantId; })[0];
+  if (!t) throw new Error('AUTH: สิทธิ์การเข้าพักสิ้นสุดแล้ว');
+  const invoices = sortBy_(r[1].filter(function (i) { return i.tenancyId === t.id; }), 'month', true);
+  const payments = r[2]
     .filter(function (p) { return invoices.some(function (i) { return i.id === p.invoiceId; }); });
-  const repairs = fsWhere_(COL.REPAIRS, { roomId: s.roomId }, { field: 'date', dir: 'DESCENDING' })
-    .filter(function (r) { return r.date >= t.moveIn; })
+  const repairs = sortBy_(r[3], 'date', true)
+    .filter(function (x) { return x.date >= t.moveIn; })
     .map(function (r) { return { id: r.id, date: r.date, title: r.title, status: r.status }; });
   return {
     settings: publicSettings_(getSettings_()),

@@ -48,9 +48,18 @@ function prop_(key) {
   return PropertiesService.getScriptProperties().getProperty(key);
 }
 
+/** ค่าตั้งค่าเก็บในแคช 10 นาที (ไม่ต้องถาม Firestore ทุกครั้ง) */
 function getSettings_() {
-  const s = fsGet_(COL.SETTINGS, 'main');
-  return Object.assign({}, DEFAULT_SETTINGS, s || {});
+  const cache = CacheService.getScriptCache();
+  const hit = cache.get('settings');
+  if (hit) return JSON.parse(hit);
+  const s = Object.assign({}, DEFAULT_SETTINGS, fsGet_(COL.SETTINGS, 'main') || {});
+  cache.put('settings', JSON.stringify(s), 600);
+  return s;
+}
+
+function clearSettingsCache_() {
+  CacheService.getScriptCache().remove('settings');
 }
 
 /** ส่วนที่ผู้เช่า/หน้า login เห็นได้ (ไม่มี id ภายใน) */

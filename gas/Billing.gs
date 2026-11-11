@@ -9,15 +9,29 @@
 /** ตารางจดมิเตอร์ของเดือนที่เลือก — เฉพาะห้องที่มีผู้เช่า */
 function apiGetMonthSheet(token, month) {
   requireSession_(token, 'admin');
+  return monthSheet_(month).rows;
+}
+
+/** อ่านทุกอย่างที่ต้องใช้ของเดือนนั้นในรอบเดียว (ยิงพร้อมกัน) */
+function monthSheet_(month) {
   const prev = prevMonth_(month);
-  const rooms = fsWhere_(COL.ROOMS, { status: 'occupied' });
+  const r = fsMulti_([
+    { where: [COL.ROOMS, { status: 'occupied' }] },
+    { where: [COL.TENANCIES, { status: 'active' }] },
+    { where: [COL.READINGS, { month: prev }] },
+    { where: [COL.READINGS, { month: month }] },
+    { where: [COL.INVOICES, { month: month }] },
+  ]);
+  const rooms = r[0];
+  const tenancies = {};
+  r[1].forEach(function (t) { tenancies[t.id] = t; });
   const readings = {};
-  fsList_(COL.READINGS).forEach(function (r) { readings[r.id] = r; });
+  r[2].concat(r[3]).forEach(function (x) { readings[x.id] = x; });
   const invoices = {};
-  fsWhere_(COL.INVOICES, { month: month }).forEach(function (i) { invoices[i.roomId] = i; });
+  r[4].forEach(function (i) { invoices[i.roomId] = i; });
 
   const rows = rooms.map(function (room) {
-    const t = fsGet_(COL.TENANCIES, room.currentTenancyId) || {};
+    const t = tenancies[room.currentTenancyId] || {};
     const p = readings[room.id + '_' + prev];
     const c = readings[room.id + '_' + month];
     const movedInThisMonth = t.moveIn && t.moveIn.slice(0, 7) >= month;
@@ -32,18 +46,22 @@ function apiGetMonthSheet(token, month) {
     };
   });
   rows.sort(function (a, b) { return Number(a.roomId) - Number(b.roomId); });
-  return rows;
+  const roomsById = {};
+  rooms.forEach(function (x) { roomsById[x.id] = x; });
+  return { rows: rows, rooms: roomsById, tenancies: tenancies, invoices: invoices };
 }
 
 /** rows: [{roomId, water, electric}] */
 function apiSaveReadings(token, month, rows) {
   requireSession_(token, 'admin');
+  const docs = {};
   rows.forEach(function (r) {
     if (r.water === '' || r.electric === '' || r.water == null || r.electric == null) return;
-    fsSet_(COL.READINGS, r.roomId + '_' + month, {
+    docs[r.roomId + '_' + month] = {
       roomId: r.roomId, month: month, water: Number(r.water), electric: Number(r.electric),
-    });
+    };
   });
+  fsSetMany_(COL.READINGS, docs);
   return true;
 }
 
@@ -72,7 +90,8 @@ function calcInvoice_(settings, room, tenancy, prevR, curR, month) {
 function apiGenerateInvoices(token, month) {
   requireSession_(token, 'admin');
   const settings = getSettings_();
-  const sheet = apiGetMonthSheet(token, month);
+  const ms = monthSheet_(month);
+  const sheet = ms.rows;
   const p = month.split('-').map(Number);
   // วันครบกำหนด = วันที่ dueDay ของเดือนถัดไป
   const dueDate = new Date(p[0], p[1], settings.dueDay);
@@ -82,13 +101,14 @@ function apiGenerateInvoices(token, month) {
     try {
       if (row.water === '' || row.electric === '') return { roomId: row.roomId, ok: false, error: 'ยังไม่จดมิเตอร์' };
       if (row.invoiceStatus === 'paid') return { roomId: row.roomId, ok: false, error: 'ชำระแล้ว ไม่ออกใหม่' };
-      const room = fsGet_(COL.ROOMS, row.roomId);
-      const tenancy = fsGet_(COL.TENANCIES, room.currentTenancyId);
+      const room = ms.rooms[row.roomId];
+      const tenancy = ms.tenancies[room.currentTenancyId];
+      if (!tenancy) return { roomId: row.roomId, ok: false, error: 'ไม่พบข้อมูลผู้เช่า' };
       const calc = calcInvoice_(settings, room, tenancy,
         { water: row.prevWater, electric: row.prevElectric },
         { water: row.water, electric: row.electric }, month);
       const id = row.roomId + '_' + month;
-      const old = fsGet_(COL.INVOICES, id);
+      const old = ms.invoices[row.roomId];
       if (old && old.pdfFileId) {
         try { DriveApp.getFileById(old.pdfFileId).setTrashed(true); } catch (e) { /* ไฟล์อาจถูกลบไปแล้ว */ }
       }

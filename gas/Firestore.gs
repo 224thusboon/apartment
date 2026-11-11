@@ -1,28 +1,46 @@
 /**
  * Firestore REST client แบบเบา ๆ (ใช้ OAuth token ของเจ้าของสคริปต์)
  * GAS ต้องผูกกับ GCP project เดียวกับ Firestore (ดู README)
+ *
+ * ความเร็ว: แต่ละคำขอไป Firestore ใช้เวลา ~0.2-0.5 วินาที
+ * ถ้าต้องอ่านหลายอย่าง ให้ใช้ fsMulti_ ซึ่งยิงทุกคำขอพร้อมกัน (UrlFetchApp.fetchAll)
  */
 
+let FS_BASE_ = '';
 function fsBase_() {
+  if (FS_BASE_) return FS_BASE_;
   const pid = prop_('FIRESTORE_PROJECT_ID');
   if (!pid) throw new Error('ยังไม่ได้ตั้ง Script Property FIRESTORE_PROJECT_ID');
-  return 'https://firestore.googleapis.com/v1/projects/' + pid + '/databases/(default)/documents';
+  FS_BASE_ = 'https://firestore.googleapis.com/v1/projects/' + pid + '/databases/(default)/documents';
+  return FS_BASE_;
 }
 
-function fsFetch_(url, method, payload) {
-  const opt = {
+/** สร้างคำขอ (ยังไม่ส่ง) */
+function fsReq_(url, method, payload) {
+  const r = {
+    url: url,
     method: method || 'get',
     contentType: 'application/json',
     headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
     muteHttpExceptions: true,
   };
-  if (payload !== undefined) opt.payload = JSON.stringify(payload);
-  const res = UrlFetchApp.fetch(url, opt);
+  if (payload !== undefined) r.payload = JSON.stringify(payload);
+  return r;
+}
+
+function fsParse_(res) {
   const code = res.getResponseCode();
   const text = res.getContentText();
   if (code === 404) return null;
   if (code >= 300) throw new Error('Firestore ' + code + ': ' + text);
   return text ? JSON.parse(text) : {};
+}
+
+function fsFetch_(url, method, payload) {
+  const r = fsReq_(url, method, payload);
+  const url2 = r.url;
+  delete r.url;
+  return fsParse_(UrlFetchApp.fetch(url2, r));
 }
 
 // ---------- แปลงค่า JS <-> Firestore Value ----------
@@ -73,10 +91,59 @@ function docToObj_(doc) {
   return o;
 }
 
+// ---------- อ่านหลายอย่างพร้อมกัน ----------
+
+/** structuredQuery แบบเงื่อนไขเท่ากับ (AND) — eq ว่าง = ทั้ง collection */
+function fsQuery_(col, eq) {
+  eq = eq || {};
+  const filters = Object.keys(eq).map(function (k) {
+    return { fieldFilter: { field: { fieldPath: k }, op: 'EQUAL', value: toFs_(eq[k]) } };
+  });
+  const q = { from: [{ collectionId: col }] };
+  if (filters.length === 1) q.where = filters[0];
+  else if (filters.length > 1) q.where = { compositeFilter: { op: 'AND', filters: filters } };
+  return { structuredQuery: q };
+}
+
+/**
+ * specs: [{get:[col,id]} | {where:[col,{field:value}]} | {list:col}]
+ * คืนผลลำดับเดียวกับ specs (get -> object|null, where/list -> array)
+ */
+function fsMulti_(specs) {
+  const base = fsBase_();
+  const reqs = specs.map(function (s) {
+    if (s.get) return fsReq_(base + '/' + s.get[0] + '/' + encodeURIComponent(s.get[1]));
+    const col = s.where ? s.where[0] : s.list;
+    const eq = s.where ? s.where[1] : {};
+    return fsReq_(base + ':runQuery', 'post', fsQuery_(col, eq));
+  });
+  let res;
+  if (reqs.length === 1) {
+    const p = Object.assign({}, reqs[0]);
+    delete p.url;
+    res = [UrlFetchApp.fetch(reqs[0].url, p)];
+  } else {
+    res = UrlFetchApp.fetchAll(reqs);
+  }
+  return res.map(function (r, i) {
+    const j = fsParse_(r);
+    if (specs[i].get) return docToObj_(j);
+    return (j || []).filter(function (x) { return x.document; }).map(function (x) { return docToObj_(x.document); });
+  });
+}
+
+function sortBy_(rows, field, desc) {
+  const dir = desc ? -1 : 1;
+  return rows.sort(function (a, b) {
+    const x = a[field], y = b[field];
+    return (x > y ? 1 : x < y ? -1 : 0) * dir;
+  });
+}
+
 // ---------- CRUD ----------
 
 function fsGet_(col, id) {
-  return docToObj_(fsFetch_(fsBase_() + '/' + col + '/' + encodeURIComponent(id)));
+  return fsMulti_([{ get: [col, id] }])[0];
 }
 
 /** สร้าง/เขียนทับทั้งเอกสาร ถ้าไม่ระบุ id จะสุ่มให้ */
@@ -88,6 +155,20 @@ function fsSet_(col, id, data) {
   fsFetch_(fsBase_() + '/' + col + '/' + encodeURIComponent(id), 'patch', { fields: toFsFields_(clean) });
   clean.id = id;
   return clean;
+}
+
+/** เขียนหลายเอกสารพร้อมกัน  docs: {id: data} */
+function fsSetMany_(col, docs) {
+  const base = fsBase_();
+  const ids = Object.keys(docs);
+  if (!ids.length) return;
+  const now = new Date();
+  const reqs = ids.map(function (id) {
+    const clean = Object.assign({}, docs[id], { updatedAt: now });
+    delete clean.id;
+    return fsReq_(base + '/' + col + '/' + encodeURIComponent(id), 'patch', { fields: toFsFields_(clean) });
+  });
+  UrlFetchApp.fetchAll(reqs).forEach(fsParse_);
 }
 
 /** อัปเดตเฉพาะบางฟิลด์ */
@@ -107,40 +188,16 @@ function fsDelete_(col, id) {
   fsFetch_(fsBase_() + '/' + col + '/' + encodeURIComponent(id), 'delete');
 }
 
-/** อ่านทั้ง collection (ระบบมี 20 ห้อง ข้อมูลไม่เยอะ) */
+/** อ่านทั้ง collection */
 function fsList_(col) {
-  const out = [];
-  let token = '';
-  do {
-    const url = fsBase_() + '/' + col + '?pageSize=300' + (token ? '&pageToken=' + token : '');
-    const res = fsFetch_(url) || {};
-    (res.documents || []).forEach(function (d) { out.push(docToObj_(d)); });
-    token = res.nextPageToken || '';
-  } while (token);
-  return out;
+  return fsMulti_([{ list: col }])[0];
 }
 
 /**
  * query แบบเงื่อนไขเท่ากับ (AND)  เช่น fsWhere_('invoices', {roomId:'101'})
- * orderBy (ไม่บังคับ): {field:'month', dir:'DESCENDING'}
- * หมายเหตุ: where + orderBy คนละฟิลด์ Firestore จะขอให้สร้าง composite index
- * จึงเรียงฝั่งสคริปต์แทน
+ * orderBy (ไม่บังคับ): {field:'month', dir:'DESCENDING'} — เรียงฝั่งสคริปต์
  */
 function fsWhere_(col, eq, orderBy) {
-  const filters = Object.keys(eq).map(function (k) {
-    return { fieldFilter: { field: { fieldPath: k }, op: 'EQUAL', value: toFs_(eq[k]) } };
-  });
-  const q = { from: [{ collectionId: col }] };
-  if (filters.length === 1) q.where = filters[0];
-  else if (filters.length > 1) q.where = { compositeFilter: { op: 'AND', filters: filters } };
-  const res = fsFetch_(fsBase_() + ':runQuery', 'post', { structuredQuery: q }) || [];
-  let rows = res.filter(function (r) { return r.document; }).map(function (r) { return docToObj_(r.document); });
-  if (orderBy) {
-    const dir = orderBy.dir === 'DESCENDING' ? -1 : 1;
-    rows.sort(function (a, b) {
-      const x = a[orderBy.field], y = b[orderBy.field];
-      return (x > y ? 1 : x < y ? -1 : 0) * dir;
-    });
-  }
-  return rows;
+  const rows = fsMulti_([{ where: [col, eq] }])[0];
+  return orderBy ? sortBy_(rows, orderBy.field, orderBy.dir === 'DESCENDING') : rows;
 }

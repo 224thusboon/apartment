@@ -6,8 +6,13 @@
 function apiAdminBootstrap(token) {
   requireSession_(token, 'admin');
   const settings = getSettings_();
-  const rooms = fsList_(COL.ROOMS);
-  const tenancies = fsWhere_(COL.TENANCIES, { status: 'active' });
+  const r = fsMulti_([
+    { list: COL.ROOMS },
+    { where: [COL.TENANCIES, { status: 'active' }] },
+    { where: [COL.PAYMENTS, { status: 'pending' }] },
+    { list: COL.REPAIRS },
+  ]);
+  const rooms = r[0], tenancies = r[1];
   const byId = {};
   tenancies.forEach(function (t) { byId[t.id] = t; });
   rooms.forEach(function (r) {
@@ -16,18 +21,24 @@ function apiAdminBootstrap(token) {
     r.moveIn = t ? t.moveIn : '';
   });
   rooms.sort(function (a, b) { return Number(a.number) - Number(b.number); });
-  const pendingPayments = fsWhere_(COL.PAYMENTS, { status: 'pending' }).length;
-  const openRepairs = fsList_(COL.REPAIRS).filter(function (r) { return r.status !== 'done'; }).length;
+  const pendingPayments = r[2].length;
+  const openRepairs = r[3].filter(function (x) { return x.status !== 'done'; }).length;
   return { settings: settings, rooms: rooms, pendingPayments: pendingPayments, openRepairs: openRepairs };
 }
 
 function apiRoomDetail(token, roomId) {
   requireSession_(token, 'admin');
+  const r = fsMulti_([
+    { get: [COL.ROOMS, roomId] },
+    { where: [COL.TENANCIES, { roomId: roomId }] },
+    { where: [COL.REPAIRS, { roomId: roomId }] },
+    { where: [COL.INVOICES, { roomId: roomId }] },
+  ]);
   return {
-    room: fsGet_(COL.ROOMS, roomId),
-    tenancies: fsWhere_(COL.TENANCIES, { roomId: roomId }, { field: 'moveIn', dir: 'DESCENDING' }),
-    repairs: fsWhere_(COL.REPAIRS, { roomId: roomId }, { field: 'date', dir: 'DESCENDING' }),
-    invoices: fsWhere_(COL.INVOICES, { roomId: roomId }, { field: 'month', dir: 'DESCENDING' }),
+    room: r[0],
+    tenancies: sortBy_(r[1], 'moveIn', true),
+    repairs: sortBy_(r[2], 'date', true),
+    invoices: sortBy_(r[3], 'month', true),
   };
 }
 
@@ -125,5 +136,6 @@ function apiSaveSettings(token, s) {
       .map(function (f) { return { name: String(f.name), amount: Number(f.amount) || 0 }; });
   }
   fsUpdate_(COL.SETTINGS, 'main', upd);
+  clearSettingsCache_();
   return getSettings_();
 }

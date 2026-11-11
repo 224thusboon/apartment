@@ -40,6 +40,7 @@ function setup() {
   if (!s.contractTemplateId) s.contractTemplateId = createContractTemplate_(root);
 
   fsSet_(COL.SETTINGS, 'main', s);
+  clearSettingsCache_();
 
   const existing = fsList_(COL.ROOMS);
   if (existing.length === 0) {

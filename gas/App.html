@@ -54,7 +54,9 @@
   if (PUB.primaryColor) document.documentElement.style.setProperty('--accent', PUB.primaryColor);
   $('#title').textContent = PUB.dormName || 'หอพัก';
 
-  const state = { token: null, role: null, tab: null, admin: null };
+  const state = { token: null, role: null, tab: null, admin: null, cache: {}, dirty: false };
+  // จำว่าผู้ใช้เริ่มพิมพ์ในฟอร์มแล้ว จะได้ไม่วาดหน้าทับตอนข้อมูลใหม่มาถึง
+  document.getElementById('view').addEventListener('input', () => { state.dirty = true; });
 
   // ================= เก็บ token =================
   // เก็บใน localStorage ของ iframe และส่งให้หน้า PWA shell เก็บสำรองด้วย
@@ -65,8 +67,17 @@
       try { t ? localStorage.setItem('dormToken', t) : localStorage.removeItem('dormToken'); } catch (e) { /* ignore */ }
       if (SHELL) try { window.top.postMessage({ type: 'dorm-token', token: t || '' }, SHELL); } catch (e) { /* ignore */ }
     },
+    getMe() {
+      try { return JSON.parse(localStorage.getItem('dormMe') || 'null'); } catch (e) { return null; }
+    },
+    setMe(me) {
+      try { me ? localStorage.setItem('dormMe', JSON.stringify(me)) : localStorage.removeItem('dormMe'); } catch (e) { /* ignore */ }
+    },
     fromShell() {
       if (!SHELL) return Promise.resolve(null);
+      // ไม่ได้เปิดผ่านหน้า PWA (เช่น เปิดลิงก์ Apps Script ตรง ๆ) ก็ไม่ต้องรอ
+      const anc = location.ancestorOrigins;
+      if (anc && anc.length && anc[anc.length - 1] !== SHELL) return Promise.resolve(null);
       return new Promise((resolve) => {
         const h = (e) => {
           if (e.origin !== SHELL || !e.data || e.data.type !== 'dorm-token-reply') return;
@@ -75,7 +86,7 @@
         };
         window.addEventListener('message', h);
         try { window.top.postMessage({ type: 'dorm-ready' }, SHELL); } catch (e) { /* ignore */ }
-        setTimeout(() => { window.removeEventListener('message', h); resolve(null); }, 800);
+        setTimeout(() => { window.removeEventListener('message', h); resolve(null); }, 500);
       });
     },
   };
@@ -89,6 +100,7 @@
           const msg = (err && err.message) || String(err);
           if (msg.indexOf('AUTH:') >= 0) {
             Store.set(null);
+            Store.setMe(null);
             state.token = null;
             setTimeout(showLogin, 0);
           }
@@ -96,7 +108,30 @@
         })[fn](...args);
     });
   }
-  const api = (fn, ...args) => run(fn, state.token, ...args);
+  // คำสั่งที่แก้ข้อมูล ให้ล้างข้อมูลที่จำไว้ทั้งหมด หน้าถัดไปจะได้ไม่โชว์ของเก่า
+  const READ_ONLY = /^api(Get|List|AdminBootstrap|RoomDetail|TenantHome|WhoAmI)/;
+  async function api(fn, ...args) {
+    const res = await run(fn, state.token, ...args);
+    if (!READ_ONLY.test(fn)) state.cache = {};
+    return res;
+  }
+
+  /**
+   * แสดงข้อมูลที่จำไว้ทันที แล้วโหลดของใหม่มาแทนเบื้องหลัง
+   * ถ้าข้อมูลไม่เปลี่ยน หรือผู้ใช้กำลังกรอกฟอร์มอยู่ จะไม่วาดทับ
+   */
+  async function swr(key, fetcher, draw) {
+    const tab = state.tab;
+    const old = state.cache[key];
+    if (old) { state.dirty = false; draw(old.data); }
+    const data = await fetcher();
+    const json = JSON.stringify(data);
+    state.cache[key] = { data, json };
+    if (state.tab !== tab) return;
+    if (old && (old.json === json || state.dirty)) return;
+    state.dirty = false;
+    draw(data);
+  }
 
   function toast(msg, isErr) {
     const t = $('#toast');
@@ -256,6 +291,9 @@
   // ================= เข้าสู่ระบบ =================
   function showLogin() {
     state.role = null;
+    state.cache = {};
+    state.admin = null;
+    state.tenant = null;
     ['#tabs', '#topnav', '#logoutBtn', '#who'].forEach((s) => $(s).classList.add('hidden'));
     closeModal();
     $('#view').innerHTML = `
@@ -302,6 +340,7 @@
         state.token = r.token;
         state.roomId = r.roomId || '';
         Store.set(r.token);
+        Store.setMe({ role: r.role, roomId: state.roomId });
         start(r.role);
       });
     };
@@ -310,6 +349,7 @@
   $('#logoutBtn').onclick = async () => {
     try { await run('apiLogout', state.token); } catch (e) { /* ignore */ }
     Store.set(null);
+    Store.setMe(null);
     state.token = null;
     showLogin();
   };
@@ -349,8 +389,14 @@
     return state.admin;
   }
 
-  async function adminRooms(cached) {
-    const d = cached === true && state.admin ? state.admin : await loadAdmin();
+  function adminRooms(cached) {
+    if (cached === true && state.admin) return drawRooms(state.admin);
+    return swr('admin', loadAdmin, drawRooms);
+  }
+  function drawRooms(d) {
+    state.admin = d;
+    setBadge('payments', d.pendingPayments);
+    setBadge('repairs', d.openRepairs);
     const occ = d.rooms.filter((r) => r.status === 'occupied').length;
     const vacant = d.rooms.filter((r) => r.status === 'vacant').length;
     const pct = d.rooms.length ? Math.round((occ / d.rooms.length) * 100) : 0;
@@ -532,10 +578,14 @@
   }
 
   // ---------- บิล / มิเตอร์ ----------
-  async function adminBilling(month) {
+  function adminBilling(month) {
     month = month || state.billMonth || thisMonth();
     state.billMonth = month;
-    const [rows, invoices] = await Promise.all([api('apiGetMonthSheet', month), api('apiListInvoices', month)]);
+    return swr('bill_' + month,
+      () => Promise.all([api('apiGetMonthSheet', month), api('apiListInvoices', month)]),
+      (r) => drawBilling(month, r[0], r[1]));
+  }
+  function drawBilling(month, rows, invoices) {
     $('#view').innerHTML = `
       ${sec(`จดมิเตอร์ ${thMonth(month)}`, `<input type="month" id="mon" value="${month}" style="width:auto">`)}
       <p class="muted" style="font-size:14px;margin-top:-6px">กรอกเลขมิเตอร์สิ้นเดือน หน่วยที่ใช้คิดจากเลขเดือนก่อน</p>
@@ -592,9 +642,11 @@
   function go_billing(m) { $('#view').innerHTML = '<div class="center muted">กำลังโหลด…</div>'; adminBilling(m).catch(fail); }
 
   // ---------- สลิป ----------
-  async function adminPayments(status) {
+  function adminPayments(status) {
     status = status === undefined ? 'pending' : status;
-    const rows = await api('apiListPayments', status);
+    return swr('pay_' + status, () => api('apiListPayments', status), (rows) => drawPayments(status, rows));
+  }
+  function drawPayments(status, rows) {
     $('#view').innerHTML = `
       ${sec('สลิปโอนเงิน', `<select id="pf" style="width:auto"><option value="pending">รอตรวจ</option><option value="">ทั้งหมด</option></select>`)}
       <div class="card">${rows.length ? rows.map((p) => `
@@ -635,9 +687,11 @@
     </div>`;
   }
 
-  async function adminRepairs(onlyOpen) {
+  function adminRepairs(onlyOpen) {
     onlyOpen = onlyOpen === undefined ? true : onlyOpen;
-    const rows = await api('apiListRepairs', onlyOpen);
+    return swr('rep_' + onlyOpen, () => api('apiListRepairs', onlyOpen), (rows) => drawRepairs(onlyOpen, rows));
+  }
+  function drawRepairs(onlyOpen, rows) {
     $('#view').innerHTML = `
       ${sec('งานซ่อม', `<select id="rf" style="width:auto"><option value="1">ยังไม่เสร็จ</option><option value="0">ทั้งหมด</option></select>
         <button type="button" id="addR">${ic('plus')} เพิ่ม</button>`)}
@@ -686,8 +740,10 @@
   }
 
   // ---------- ตั้งค่า ----------
-  async function adminSettings() {
-    const s = (await loadAdmin()).settings;
+  function adminSettings() {
+    return swr('admin', loadAdmin, (d) => drawSettings(d.settings));
+  }
+  function drawSettings(s) {
     // หมายเหตุ: Apps Script ลบคอมเมนต์ในสคริปต์ก่อนส่งไปเบราว์เซอร์ และแยกไม่ออกว่าอยู่ในสตริง
     // จึงห้ามมีสองตัวนี้ในโค้ด: ทับสองตัวติดกัน (ใช้ :\/\/ แทน) และทับตามด้วยดอกจัน (ใช้ /\x2a แทน)
     const docUrl = (id) => id ? `https:\/\/docs.google.com/document/d/${encodeURIComponent(id)}/edit` : '';
@@ -750,8 +806,11 @@
     return state.tenant;
   }
 
-  async function tenantBills() {
-    const d = await loadTenant();
+  function tenantBills() {
+    return swr('tenant', loadTenant, drawTenantBills);
+  }
+  function drawTenantBills(d) {
+    state.tenant = d;
     const unpaid = d.invoices.filter((i) => i.status !== 'paid');
     const due = unpaid.filter((i) => i.status === 'unpaid');
     const dueTotal = due.reduce((s, i) => s + Number(i.total || 0), 0);
@@ -812,8 +871,11 @@
     };
   }
 
-  async function tenantRepair() {
-    const d = state.tenant || await loadTenant();
+  function tenantRepair() {
+    return swr('tenant', loadTenant, drawTenantRepair);
+  }
+  function drawTenantRepair(d) {
+    state.tenant = d;
     $('#view').innerHTML = `
       ${sec('แจ้งซ่อม')}
       <div class="cols">
@@ -836,14 +898,16 @@
         const photos = await readFiles($('[name=photos]', e.target));
         await api('apiReportRepair', f, photos);
         toast('ส่งเรื่องแล้ว');
-        await loadTenant();
         tenantRepair();
       });
     };
   }
 
-  async function tenantMe() {
-    const d = state.tenant || await loadTenant();
+  function tenantMe() {
+    return swr('tenant', loadTenant, drawTenantMe);
+  }
+  function drawTenantMe(d) {
+    state.tenant = d;
     $('#view').innerHTML = `
       ${sec('ห้องของฉัน')}
       <div class="cols">
@@ -863,11 +927,19 @@
   (async function boot() {
     state.token = Store.get() || await Store.fromShell();
     if (!state.token) return showLogin();
-    try {
-      const me = await run('apiWhoAmI', state.token);
+    // จำบทบาทไว้ในเครื่องแล้ว: เปิดหน้าได้เลย ไม่ต้องถามเซิร์ฟเวอร์ก่อน
+    // (ถ้า session หมดอายุ คำขอแรกจะตอบ AUTH แล้วเด้งไปหน้าเข้าสู่ระบบเอง)
+    const me = Store.getMe();
+    if (me && me.role) {
       state.roomId = me.roomId || '';
+      return start(me.role);
+    }
+    try {
+      const who = await run('apiWhoAmI', state.token);
+      state.roomId = who.roomId || '';
       Store.set(state.token);
-      start(me.role);
+      Store.setMe({ role: who.role, roomId: state.roomId });
+      start(who.role);
     } catch (e) {
       showLogin();
     }
