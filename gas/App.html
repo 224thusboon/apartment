@@ -519,8 +519,10 @@
       <h3>ใบแจ้งหนี้</h3>
       <div class="card">${d.invoices.length ? d.invoices.map((i) => `
         <div class="list-item row spread">
-          <div class="grow">${thMonth(i.month)} · <strong>${fmt(i.total)} ฿</strong> <span class="muted">${esc(i.tenantName)}</span></div>
-          <div>${pill(i.status)} ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.month)}">PDF</button>` : ''}</div>
+          <div class="grow">${thMonth(i.month)} · <strong>${fmt(i.total)} ฿</strong> <span class="muted">${esc(i.tenantName)}</span>
+            <div class="muted" style="font-size:13px">ใบแจ้งหนี้ ${esc(i.number || '-')}${i.receiptNo ? ' → ใบเสร็จ ' + esc(i.receiptNo) : ''}</div></div>
+          <div>${pill(i.status)} ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.number || i.month)}">ใบแจ้งหนี้</button>` : ''}
+            ${i.receiptPdfId ? `<button type="button" class="small ghost" data-file="${esc(i.receiptPdfId)}" data-title="ใบเสร็จ ${esc(i.receiptNo || '')}">ใบเสร็จ</button>` : ''}</div>
         </div>`).join('') : '<span class="muted">ยังไม่มี</span>'}</div>`;
 
     const refresh = () => { openRoom(roomId); if (state.tab === 'rooms') adminRooms(); };
@@ -645,13 +647,15 @@
         <div class="list-item">
           <div class="row spread">
             <div class="grow"><strong>ห้อง ${esc(i.roomId)}</strong> ${esc(i.tenantName)}
-              <div class="muted">เลขที่ ${esc(i.number || '-')} · ${fmt(i.total)} บาท · ครบกำหนด ${thDate(i.dueDate)}</div></div>
+              <div class="muted">เลขที่ ${esc(i.number || '-')} · ${fmt(i.total)} บาท · ครบกำหนด ${thDate(i.dueDate)}</div>
+              ${i.receiptNo ? `<div class="muted" style="font-size:13px">ใบเสร็จ ${esc(i.receiptNo)} · ยืนยันการโอน ${thDate(i.paidAt)}</div>` : ''}</div>
             <select data-inv="${esc(i.id)}" style="width:auto">
               ${['unpaid', 'pending', 'paid'].map((s) => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${STATUS[s]}</option>`).join('')}
             </select>
           </div>
           <div class="row" style="margin-top:6px">
-            ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.roomId)}">PDF</button>` : ''}
+            ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.number || i.roomId)}">ใบแจ้งหนี้</button>` : ''}
+            ${i.receiptPdfId ? `<button type="button" class="small ghost" data-file="${esc(i.receiptPdfId)}" data-title="ใบเสร็จ ${esc(i.receiptNo || '')}">ใบเสร็จ</button>` : ''}
             ${i.status !== 'paid' ? `<button type="button" class="small ghost" data-editinv="${esc(i.id)}">แก้ไข</button>
             <button type="button" class="small ghost" data-cancelinv="${esc(i.id)}" style="color:var(--bad);border-color:var(--bad)">ยกเลิกใบนี้</button>` : ''}
           </div>
@@ -785,7 +789,7 @@
             <span class="ic">${ic('card')}</span>
             <div class="grow">
               <div class="row spread"><strong>ห้อง ${esc(p.roomId)} · ${fmt(p.amount)} ฿</strong>${pill(p.status)}</div>
-              <div class="muted">บิล ${thMonth(p.month)} · ส่งเมื่อ ${thDate(p.uploadedAt)}${p.note ? ' · ' + esc(p.note) : ''}</div>
+              <div class="muted">บิล ${thMonth(p.month)} · ส่งเมื่อ ${thDate(p.uploadedAt)}${p.note ? ' · ' + esc(p.note) : ''}${p.receiptNo ? ' · ใบเสร็จ ' + esc(p.receiptNo) : ''}</div>
             </div>
           </div>
           <div class="row" style="margin-top:8px;padding-left:52px">
@@ -922,9 +926,11 @@
         <div class="list-item row spread">
           <div class="grow"><strong class="${e.type === 'income' ? 'money-in' : 'money-out'}">${e.type === 'income' ? '+' : '−'}${fmt(e.amount)}</strong> ${esc(e.category)}
             <span class="pill ${e.source === 'manual' ? 's-ended' : 's-occupied'}" style="margin-left:4px">${e.source === 'invoice' ? 'จากใบแจ้งหนี้' : e.source === 'repair' ? 'จากงานซ่อม' : 'บันทึกเอง'}</span>
-            <div class="muted" style="font-size:14px">${thDate(e.date)}${e.note ? ' · ' + esc(e.note) : ''}</div></div>
+            <div class="muted" style="font-size:14px">${thDate(e.date)}${e.note ? ' · ' + esc(e.note) : ''}</div>
+            ${e.source === 'invoice' ? `<div class="muted" style="font-size:13px">ใบแจ้งหนี้ ${esc(e.invoiceNo || '-')} → ใบเสร็จ ${esc(e.receiptNo || '-')}</div>` : ''}</div>
           <div class="row">
-            ${e.fileId ? `<button type="button" class="small ghost" data-file="${esc(e.fileId)}" data-title="ใบเสร็จ">ใบเสร็จ</button>` : ''}
+            ${e.invoiceFileId ? `<button type="button" class="small ghost" data-file="${esc(e.invoiceFileId)}" data-title="ใบแจ้งหนี้ ${esc(e.invoiceNo || '')}">ใบแจ้งหนี้</button>` : ''}
+            ${e.fileId ? `<button type="button" class="small ghost" data-file="${esc(e.fileId)}" data-title="ใบเสร็จ ${esc(e.receiptNo || '')}">ใบเสร็จ</button>` : ''}
             ${e.source === 'manual' ? `<button type="button" class="small ghost" data-editent="${esc(e.id)}">แก้ไข</button>
             <button type="button" class="small ghost" data-delent="${esc(e.id)}">ลบ</button>` : ''}
           </div>
@@ -1076,14 +1082,15 @@
       ${d.invoices.length ? d.invoices.map((i) => {
         const pays = d.payments.filter((p) => p.invoiceId === i.id);
         return `<div class="card bill" style="margin:0">
-          <div class="row spread"><div class="li"><span class="ic">${ic('bill')}</span><div><strong>${thMonth(i.month)}</strong><div class="muted" style="font-size:14px">ครบกำหนด ${thDate(i.dueDate)}</div></div></div>${pill(i.status)}</div>
+          <div class="row spread"><div class="li"><span class="ic">${ic('bill')}</span><div><strong>${thMonth(i.month)}</strong><div class="muted" style="font-size:14px">เลขที่ ${esc(i.number || '-')} · ครบกำหนด ${thDate(i.dueDate)}</div>${i.receiptNo ? `<div class="muted" style="font-size:13px">ใบเสร็จ ${esc(i.receiptNo)}</div>` : ''}</div></div>${pill(i.status)}</div>
           <div class="bill-amt" style="margin-top:10px">${fmt(i.total)} <span class="muted" style="font-size:16px">บาท</span></div>
           <div class="bill-lines">
             ${(i.items || []).map((it) => `<div class="row spread"><span>${esc(it.name)} <span class="muted">${esc(it.detail)}</span></span><span>${fmt(it.amount)}</span></div>`).join('')}
           </div>
           ${pays.map((p) => `<div class="muted" style="font-size:14px;margin-top:6px">${ic('upload')} สลิป ${thDate(p.uploadedAt)} · ${fmt(p.amount)} ฿ · ${STATUS[p.status]}${p.note ? ' (' + esc(p.note) + ')' : ''}</div>`).join('')}
           <div class="row" style="margin-top:12px">
-            ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.month)}">${ic('file')} ใบแจ้งหนี้</button>` : ''}
+            ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.number || i.month)}">${ic('file')} ใบแจ้งหนี้</button>` : ''}
+            ${i.receiptPdfId ? `<button type="button" class="small ghost" data-file="${esc(i.receiptPdfId)}" data-title="ใบเสร็จ ${esc(i.receiptNo || '')}">${ic('file')} ใบเสร็จ</button>` : ''}
             ${i.status !== 'paid' ? `<button type="button" class="small" data-slip="${esc(i.id)}">${ic('upload')} แนบสลิป</button>` : ''}
           </div>
         </div>`;

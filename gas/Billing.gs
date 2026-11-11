@@ -113,11 +113,8 @@ function apiGenerateInvoices(token, month) {
   const dueIso = Utilities.formatDate(dueDate, 'Asia/Bangkok', 'yyyy-MM-dd');
   const per = monthPeriod_(month);
 
-  // เลขที่ใบแจ้งหนี้รันต่อเนื่อง (อ่านค่าล่าสุดจาก Firestore ตรง ๆ ไม่ใช้แคช)
-  const r = fsMulti_([{ get: [COL.SETTINGS, 'main'] }, { list: COL.TENANTS }]);
-  let seq = Number((r[0] || {}).invoiceSeq) || 0;
   const tenants = {};
-  r[1].forEach(function (t) { tenants[t.id] = t; });
+  fsList_(COL.TENANTS).forEach(function (t) { tenants[t.id] = t; });
 
   const results = sheet.map(function (row) {
     try {
@@ -139,7 +136,7 @@ function apiGenerateInvoices(token, month) {
       const inv = {
         roomId: row.roomId, month: month, tenancyId: tenancy.id, tenantName: tenancy.tenantName,
         tenantAddress: tenant.address || '',
-        number: old && old.number ? old.number : ('00' + (++seq)).slice(-3),
+        number: old && old.number ? old.number : nextDocNo_('inv', per.end),
         periodStart: per.start, periodEnd: per.end,
         items: calc.items, total: calc.total, dueDate: dueIso,
         status: old && old.status === 'pending' ? 'pending' : 'unpaid',
@@ -152,9 +149,32 @@ function apiGenerateInvoices(token, month) {
       return { roomId: row.roomId, ok: false, error: String(err.message || err) };
     }
   });
-  fsUpdate_(COL.SETTINGS, 'main', { invoiceSeq: seq });
-  clearSettingsCache_();
   return results;
+}
+
+/** '2026-10-31' -> '25691031' (พ.ศ. เดือน วันที่) */
+function beDateKey_(iso) {
+  const p = String(iso).slice(0, 10).split('-');
+  return (Number(p[0]) + 543) + p[1] + p[2];
+}
+
+/**
+ * เลขที่เอกสาร = พ.ศ.เดือนวันที่-ลำดับของวันนั้น เช่น 25691031-001
+ * kind: 'inv' ใบแจ้งหนี้ / 'rc' ใบเสร็จ (นับแยกกัน)
+ */
+function nextDocNo_(kind, iso) {
+  const key = beDateKey_(iso);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(15000);
+  try {
+    const id = kind + '_' + key;
+    const c = fsGet_(COL.COUNTERS, id);
+    const n = (c ? Number(c.n) || 0 : 0) + 1;
+    fsSet_(COL.COUNTERS, id, { n: n });
+    return key + '-' + ('00' + n).slice(-3);
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 /** '2026-10' -> {start:'2026-10-01', end:'2026-10-31'} */
@@ -179,7 +199,17 @@ function apiListInvoices(token, month) {
 function apiSetInvoiceStatus(token, invoiceId, status) {
   requireSession_(token, 'admin');
   if (['unpaid', 'pending', 'paid'].indexOf(status) < 0) throw new Error('สถานะไม่ถูกต้อง');
-  return fsUpdate_(COL.INVOICES, invoiceId, { status: status, paidAt: status === 'paid' ? today_() : '' });
+  const inv = fsGet_(COL.INVOICES, invoiceId);
+  if (!inv) throw new Error('ไม่พบใบแจ้งหนี้');
+  if (status === 'paid') {
+    const paidAt = inv.status === 'paid' && inv.paidAt ? inv.paidAt : today_();
+    fsUpdate_(COL.INVOICES, invoiceId, { status: 'paid', paidAt: paidAt });
+    issueReceipt_(invoiceId, paidAt, '');
+  } else {
+    fsUpdate_(COL.INVOICES, invoiceId, { status: status, paidAt: '' });
+    if (inv.receiptId) voidReceipt_(invoiceId, 'เปลี่ยนสถานะใบแจ้งหนี้เป็น ' + status);
+  }
+  return true;
 }
 
 function round2_(n) { return Math.round(Number(n) * 100) / 100; }

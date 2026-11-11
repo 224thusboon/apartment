@@ -32,7 +32,8 @@ function gFetch_(url, method, payload) {
 
 // ---------- สร้างแม่แบบ ----------
 
-function createInvoiceTemplate_(folder) {
+function createInvoiceTemplate_(folder, kind) {
+  const isRc = kind === 'receipt';
   // ความกว้างคอลัมน์ A-G (สัดส่วนใบเดิม รวม ~700px = พอดีกระดาษ A4 ไม่ถูกย่อ)
   const widths = [42, 228, 58, 100, 68, 86, 120];
   const R = {}; // R[row][col] = {v, bold, size, align, text}
@@ -40,7 +41,7 @@ function createInvoiceTemplate_(folder) {
   const RIGHT = { align: 'RIGHT', text: true };
   const CENTER = { align: 'CENTER' };
 
-  put(0, 4, 'ใบแจ้งหนี้', { bold: true, size: 16 });
+  put(0, 4, isRc ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้', { bold: true, size: 16 });
   put(1, 0, '{{addr1}}');
   put(2, 0, '{{addr2}}');
   put(4, 0, 'โทร. {{phone}}');
@@ -48,7 +49,10 @@ function createInvoiceTemplate_(folder) {
   // กล่องผู้เช่า แถว 6-8
   put(6, 0, 'ชื่อ'); put(6, 1, 'คุณ  {{tenantName}}'); put(6, 4, 'เลขที่  {{invoiceNo}}');
   put(7, 0, 'ที่อยู่'); put(7, 1, '{{tenantAddress}}'); put(7, 4, 'วันที่  {{invoiceDate}}');
-  put(8, 0, 'วันที่เริ่มคิดค่าบริการ  {{periodStart}} - {{periodEnd}}'); put(8, 4, 'ห้อง  {{roomId}}');
+  put(8, 0, isRc
+    ? 'อ้างอิงใบแจ้งหนี้เลขที่  {{refNo}}   ค่าบริการ  {{periodStart}} - {{periodEnd}}'
+    : 'วันที่เริ่มคิดค่าบริการ  {{periodStart}} - {{periodEnd}}');
+  put(8, 4, 'ห้อง  {{roomId}}');
 
   // หัวตาราง แถว 10
   ['ลำดับ', 'รายการ', 'จำนวน', 'ราคา', 'จำนวนเงิน', 'ภาษี', 'รวมเงิน'].forEach(function (h, c) { put(10, c, h, CENTER); });
@@ -105,9 +109,9 @@ function createInvoiceTemplate_(folder) {
   }
 
   const ss = JSON.parse(gFetch_('https://sheets.googleapis.com/v4/spreadsheets', 'post', {
-    properties: { title: 'แม่แบบ - ใบแจ้งหนี้', locale: 'th_TH' },
+    properties: { title: isRc ? 'แม่แบบ - ใบเสร็จรับเงิน' : 'แม่แบบ - ใบแจ้งหนี้', locale: 'th_TH' },
     sheets: [{
-      properties: { sheetId: 0, title: 'ใบแจ้งหนี้', gridProperties: { rowCount: ROWS, columnCount: 7, hideGridlines: true } },
+      properties: { sheetId: 0, title: isRc ? 'ใบเสร็จ' : 'ใบแจ้งหนี้', gridProperties: { rowCount: ROWS, columnCount: 7, hideGridlines: true } },
       data: [{ startRow: 0, startColumn: 0, rowData: rowData }],
     }],
   }).getContentText());
@@ -147,13 +151,25 @@ function createInvoiceTemplate_(folder) {
 function rebuildInvoiceTemplate() {
   const s = getSettings_();
   const folder = DriveApp.getFolderById(s.rootFolderId);
-  const id = createInvoiceTemplate_(folder);
-  if (s.invoiceTemplateId) {
-    try { DriveApp.getFileById(s.invoiceTemplateId).setTrashed(true); } catch (e) { /* ไม่มีไฟล์เก่า */ }
-  }
-  fsUpdate_(COL.SETTINGS, 'main', { invoiceTemplateId: id });
+  const id = createInvoiceTemplate_(folder, 'invoice');
+  const rid = createInvoiceTemplate_(folder, 'receipt');
+  [s.invoiceTemplateId, s.receiptTemplateId].forEach(function (old) {
+    if (old) { try { DriveApp.getFileById(old).setTrashed(true); } catch (e) { /* ไม่มีไฟล์เก่า */ } }
+  });
+  fsUpdate_(COL.SETTINGS, 'main', { invoiceTemplateId: id, receiptTemplateId: rid });
   clearSettingsCache_();
-  Logger.log('แม่แบบใหม่: https://docs.google.com/spreadsheets/d/' + id + '/edit');
+  Logger.log('แม่แบบใบแจ้งหนี้: https://docs.google.com/spreadsheets/d/' + id + '/edit');
+  Logger.log('แม่แบบใบเสร็จ: https://docs.google.com/spreadsheets/d/' + rid + '/edit');
+}
+
+/** สร้างแม่แบบใบเสร็จครั้งแรกถ้ายังไม่มี */
+function ensureReceiptTemplate_(s) {
+  if (s.receiptTemplateId) return s.receiptTemplateId;
+  const id = createInvoiceTemplate_(DriveApp.getFolderById(s.rootFolderId), 'receipt');
+  fsUpdate_(COL.SETTINGS, 'main', { receiptTemplateId: id });
+  clearSettingsCache_();
+  s.receiptTemplateId = id;
+  return id;
 }
 
 // ---------- เติมแม่แบบ -> PDF ----------
@@ -165,18 +181,40 @@ function fmtQty_(q) {
 
 function renderInvoicePdf_(settings, inv) {
   if (!settings.invoiceTemplateId) throw new Error('ยังไม่มีแม่แบบใบแจ้งหนี้ (รัน rebuildInvoiceTemplate)');
+  const map = docMap_(settings, inv, {
+    docNo: inv.number, docDate: inv.issuedAt,
+    notes: String(settings.invoiceNotes || '').split(/\r?\n/), footer: settings.invoiceFooter || '',
+  });
+  return renderSheetPdf_(settings, settings.invoiceTemplateId, 'ใบแจ้งหนี้ ' + inv.roomId + ' ' + inv.month, inv.roomId, map);
+}
+
+/** ใบเสร็จ: รายการเดียวกับใบแจ้งหนี้ อ้างอิงเลขที่ใบแจ้งหนี้ */
+function renderReceiptPdf_(settings, inv, rc) {
+  const tid = ensureReceiptTemplate_(settings);
+  const map = docMap_(settings, inv, {
+    docNo: rc.number, docDate: rc.paidAt, refNo: inv.number || '-',
+    notes: [
+      'ได้รับเงินตามรายการข้างต้นเรียบร้อยแล้ว',
+      'ชำระโดยโอนเงิน  ยืนยันการโอนวันที่ ' + shortDate_(rc.paidAt),
+      'อ้างอิงใบแจ้งหนี้เลขที่ ' + (inv.number || '-'),
+    ],
+    footer: '',
+  });
+  return renderSheetPdf_(settings, tid, 'ใบเสร็จ ' + rc.number + ' ห้อง ' + inv.roomId, inv.roomId, map);
+}
+
+function docMap_(settings, inv, o) {
   const items = inv.items || [];
   if (items.length > INV_MAX_ITEMS) throw new Error('รายการเกิน ' + INV_MAX_ITEMS + ' บรรทัด');
   const addr = String(settings.dormAddress || '').split(/\r?\n/);
-  const notes = String(settings.invoiceNotes || '').split(/\r?\n/);
   const map = {
     addr1: addr[0] || '', addr2: addr.slice(1).join(' '), phone: settings.phone || '',
     tenantName: inv.tenantName || '', tenantAddress: inv.tenantAddress || '',
-    invoiceNo: inv.number || '', invoiceDate: shortDate_(inv.issuedAt),
+    invoiceNo: o.docNo || '', invoiceDate: shortDate_(o.docDate), refNo: o.refNo || '',
     periodStart: shortDate_(inv.periodStart), periodEnd: shortDate_(inv.periodEnd),
-    roomId: inv.roomId, total: money_(inv.total), footer: settings.invoiceFooter || '',
+    roomId: inv.roomId, total: money_(inv.total), footer: o.footer || '',
   };
-  for (let i = 1; i <= INV_MAX_NOTES; i++) map['note' + i] = notes[i - 1] || '';
+  for (let i = 1; i <= INV_MAX_NOTES; i++) map['note' + i] = o.notes[i - 1] || '';
   for (let i = 1; i <= INV_MAX_ITEMS; i++) {
     const it = items[i - 1];
     map[i + '.no'] = it ? String(i) : '';
@@ -187,10 +225,13 @@ function renderInvoicePdf_(settings, inv) {
     map[i + '.vat'] = '';
     map[i + '.total'] = it ? money_(it.amount) : '';
   }
+  return map;
+}
 
-  const name = 'ใบแจ้งหนี้ ' + inv.roomId + ' ' + inv.month;
+/** คัดลอกแม่แบบ Sheets -> แทนค่า -> export PDF -> ลบสำเนา */
+function renderSheetPdf_(settings, templateId, name, roomId, map) {
   const folder = DriveApp.getFolderById(settings.pdfFolderId);
-  const copy = DriveApp.getFileById(settings.invoiceTemplateId).makeCopy(name, folder);
+  const copy = DriveApp.getFileById(templateId).makeCopy(name, folder);
   try {
     const reqs = Object.keys(map).map(function (k) {
       return { findReplace: { find: '{{' + k + '}}', replacement: String(map[k]), allSheets: true, matchCase: true } };
@@ -201,7 +242,7 @@ function renderInvoicePdf_(settings, inv) {
       '&top_margin=0.4&bottom_margin=0.4&left_margin=0.4&right_margin=0.4&gid=0';
     const blob = gFetch_(url).getBlob().setName(name + '.pdf');
     const pdf = folder.createFile(blob);
-    pdf.setDescription('room:' + inv.roomId);
+    pdf.setDescription('room:' + roomId);
     return pdf.getId();
   } finally {
     copy.setTrashed(true);

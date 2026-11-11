@@ -21,6 +21,8 @@ const COL = {
   REPAIRS: 'repairs',
   CHARGES: 'charges',       // รายการเรียกเก็บเพิ่มรายห้อง (เช่น ค่าซ่อมที่ผู้เช่าทำเสียหาย) รวมเข้าบิลเดือนนั้น
   LEDGER: 'ledger',         // บัญชีรายรับ-รายจ่ายที่บันทึกเอง
+  RECEIPTS: 'receipts',     // ใบเสร็จรับเงิน (ผูกกับใบแจ้งหนี้)
+  COUNTERS: 'counters',     // ตัวนับเลขที่เอกสารรายวัน เช่น inv_25691031
   SESSIONS: 'sessions',
 };
 
@@ -41,7 +43,8 @@ const DEFAULT_SETTINGS = {
   invoiceNotes: '',      // ข้อความแจ้งผู้เช่าในใบแจ้งหนี้ (หลายบรรทัด)
   invoiceFooter: '',     // หมายเหตุท้ายใบแจ้งหนี้
   invoiceSeq: 0,         // เลขที่ใบแจ้งหนี้ล่าสุด
-  invoiceTemplateId: '', // Google Docs template (setup() สร้างให้)
+  invoiceTemplateId: '', // Google Sheets template (setup() สร้างให้)
+  receiptTemplateId: '', // Google Sheets template ใบเสร็จ (สร้างเองเมื่อออกใบแรก)
   contractTemplateId: '',
   rootFolderId: '',
   slipFolderId: '',

@@ -23,7 +23,9 @@ function allEntries_(invoices, repairs, ledger) {
     rows.push({
       id: 'inv_' + i.id, source: 'invoice', type: 'income', date: date, month: date.slice(0, 7),
       category: 'ค่าเช่า', amount: Number(i.total) || 0,
-      note: 'ห้อง ' + i.roomId + (i.number ? ' · เลขที่ ' + i.number : '') + ' · บิล ' + thaiMonth_(i.month),
+      note: 'ห้อง ' + i.roomId + ' · บิล ' + thaiMonth_(i.month),
+      invoiceNo: i.number || '', receiptNo: i.receiptNo || '',
+      invoiceFileId: i.pdfFileId || '', fileId: i.receiptPdfId || '',
     });
   });
   repairs.forEach(function (r) {

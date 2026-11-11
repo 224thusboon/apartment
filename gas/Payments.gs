@@ -32,6 +32,47 @@ function apiReviewPayment(token, paymentId, approve, note) {
   const p = fsGet_(COL.PAYMENTS, paymentId);
   if (!p) throw new Error('ไม่พบรายการ');
   fsUpdate_(COL.PAYMENTS, paymentId, { status: approve ? 'approved' : 'rejected', note: note || '' });
-  fsUpdate_(COL.INVOICES, p.invoiceId, { status: approve ? 'paid' : 'unpaid', paidAt: approve ? today_() : '' });
+  if (approve) {
+    const paidAt = today_();
+    fsUpdate_(COL.INVOICES, p.invoiceId, { status: 'paid', paidAt: paidAt });
+    const rc = issueReceipt_(p.invoiceId, paidAt, paymentId);
+    if (rc) fsUpdate_(COL.PAYMENTS, paymentId, { receiptId: rc.id, receiptNo: rc.number });
+  } else {
+    fsUpdate_(COL.INVOICES, p.invoiceId, { status: 'unpaid', paidAt: '' });
+  }
   return true;
+}
+
+// ---------- ใบเสร็จรับเงิน ----------
+
+/**
+ * ออกใบเสร็จของใบแจ้งหนี้ (ถ้ามีใบที่ยังใช้งานอยู่แล้ว คืนใบเดิม)
+ * เลขที่ = พ.ศ.เดือนวันที่ที่ยืนยันการโอน-ลำดับ เช่น 25691105-001
+ */
+function issueReceipt_(invoiceId, paidAt, paymentId) {
+  const inv = fsGet_(COL.INVOICES, invoiceId);
+  if (!inv) return null;
+  if (inv.receiptId) {
+    const old = fsGet_(COL.RECEIPTS, inv.receiptId);
+    if (old && old.status !== 'void') return old;
+  }
+  const s = getSettings_();
+  const rc = {
+    number: nextDocNo_('rc', paidAt), status: 'issued',
+    invoiceId: invoiceId, invoiceNo: inv.number || '', roomId: inv.roomId, month: inv.month,
+    tenantName: inv.tenantName || '', amount: Number(inv.total) || 0, paidAt: paidAt,
+    paymentId: paymentId || '', pdfFileId: '',
+  };
+  rc.pdfFileId = renderReceiptPdf_(s, inv, rc);
+  const saved = fsSet_(COL.RECEIPTS, null, rc);
+  fsUpdate_(COL.INVOICES, invoiceId, { receiptId: saved.id, receiptNo: rc.number, receiptPdfId: rc.pdfFileId });
+  return saved;
+}
+
+/** ยกเลิกใบเสร็จ (เก็บไว้เป็นประวัติ ไม่ลบ) และตัดการเชื่อมจากใบแจ้งหนี้ */
+function voidReceipt_(invoiceId, reason) {
+  const inv = fsGet_(COL.INVOICES, invoiceId);
+  if (!inv || !inv.receiptId) return;
+  fsUpdate_(COL.RECEIPTS, inv.receiptId, { status: 'void', voidReason: reason || '', voidedAt: today_() });
+  fsUpdate_(COL.INVOICES, invoiceId, { receiptId: '', receiptNo: '', receiptPdfId: '' });
 }
