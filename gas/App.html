@@ -629,7 +629,7 @@
           <div><label>ค่าใช้จ่าย (บาท)</label><input name="cost" type="number" step="any" value="${esc(r.cost || '')}"></div>
           <div><label>สถานะ</label><select name="status">${['reported', 'in_progress', 'done'].map((s) => `<option value="${s}" ${(r.status || 'done') === s ? 'selected' : ''}>${STATUS[s]}</option>`).join('')}</select></div>
         </div>
-        <label>แนบรูป</label><input name="photos" type="file" accept="image/*" multiple>
+        <label>แนบรูป</label><input name="photos" type="file" accept="image/\x2a" multiple>
         ${(r.photoIds || []).length ? `<div class="thumbs">${r.photoIds.map((id, i) => `<button type="button" class="small ghost" data-file="${esc(id)}" data-title="รูปที่ ${i + 1}">รูปที่ ${i + 1}</button>`).join('')}</div>` : ''}
         <p><button type="submit">บันทึก</button></p>
       </form>`);
@@ -652,7 +652,8 @@
   // ---------- ตั้งค่า ----------
   async function adminSettings() {
     const s = (await loadAdmin()).settings;
-    // หมายเหตุ: เขียน :\/\/ แทน :// เพราะ Apps Script ตัดข้อความหลัง // ในสคริปต์ทิ้ง (คิดว่าเป็นคอมเมนต์)
+    // หมายเหตุ: Apps Script ลบคอมเมนต์ในสคริปต์ก่อนส่งไปเบราว์เซอร์ และแยกไม่ออกว่าอยู่ในสตริง
+    // จึงห้ามมีสองตัวนี้ในโค้ด: ทับสองตัวติดกัน (ใช้ :\/\/ แทน) และทับตามด้วยดอกจัน (ใช้ /\x2a แทน)
     const docUrl = (id) => id ? `https:\/\/docs.google.com/document/d/${encodeURIComponent(id)}/edit` : '';
     $('#view').innerHTML = `
       ${sec('ตั้งค่า', `ข้อมูลหอพัก & <span class="accent">อัตราค่าบริการ</span>`)}
@@ -759,7 +760,7 @@
     const b = openModal('แนบสลิป ' + thMonth(inv.month), `
       <form id="slipForm">
         <label>ยอดที่โอน (บาท)</label><input name="amount" type="number" step="any" value="${esc(inv.total)}">
-        <label>รูปสลิป</label><input name="file" type="file" accept="image/*,application/pdf" required>
+        <label>รูปสลิป</label><input name="file" type="file" accept="image/\x2a,application/pdf" required>
         <p><button type="submit">ส่งสลิป</button></p>
       </form>`);
     $('#slipForm', b).onsubmit = (e) => {
@@ -784,7 +785,7 @@
           <div class="li"><span class="ic">${ic('wrench')}</span><div><strong>มีอะไรเสีย บอกเราได้เลย</strong><div class="muted" style="font-size:14px">แนบรูปให้ช่างเห็นปัญหาได้ชัดขึ้น</div></div></div>
           <label>เรื่อง *</label><input name="title" required placeholder="เช่น ไฟห้องน้ำไม่ติด">
           <label>รายละเอียด</label><textarea name="detail"></textarea>
-          <label>แนบรูป (ไม่เกิน 3 รูป)</label><input name="photos" type="file" accept="image/*" multiple>
+          <label>แนบรูป (ไม่เกิน 3 รูป)</label><input name="photos" type="file" accept="image/\x2a" multiple>
           <p style="margin-top:16px"><button type="submit" style="width:100%">ส่งเรื่องแจ้งซ่อม</button></p>
         </form>
         <div>
