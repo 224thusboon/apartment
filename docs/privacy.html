@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>นโยบายความเป็นส่วนตัว</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #f3f6f9; --card: #fff; --text: #0f1d33; --muted: #64748b; --line: #e3e9f0; }
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) { --bg: #08131f; --card: #0f1e33; --text: #e6edf6; --muted: #94a3b8; --line: #1d3150; }
+    }
+    :root[data-theme="dark"] { --bg: #08131f; --card: #0f1e33; --text: #e6edf6; --muted: #94a3b8; --line: #1d3150; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: 'Sarabun', system-ui, sans-serif; line-height: 1.7; }
+    main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 20px; }
+    h1 { font-size: 24px; margin: 0 0 4px; }
+    h2 { font-size: 18px; margin: 22px 0 6px; }
+    p, li { color: var(--text); }
+    .muted { color: var(--muted); font-size: 14px; }
+  </style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h1>นโยบายความเป็นส่วนตัว</h1>
+    <p class="muted">ระบบจัดการหอพัก (ใช้ภายในหอพักเท่านั้น) · ปรับปรุงล่าสุด พฤศจิกายน 2569</p>
+
+    <h2>ข้อมูลที่เก็บ</h2>
+    <ul>
+      <li>ข้อมูลผู้เช่า: ชื่อ เบอร์โทร ที่อยู่ เลขบัตรประชาชน วันย้ายเข้า/ออก</li>
+      <li>ข้อมูลการเช่า: เลขมิเตอร์น้ำ-ไฟ ใบแจ้งหนี้ ใบเสร็จ สลิปโอนเงิน งานซ่อมและรูปถ่าย</li>
+      <li>ข้อมูลผู้ดูแล: ชื่อ อีเมล และบันทึกการทำงานในระบบ</li>
+    </ul>
+
+    <h2>ใช้ข้อมูลเพื่อ</h2>
+    <ul>
+      <li>ทำสัญญาเช่า ออกใบแจ้งหนี้และใบเสร็จ ตรวจสอบการชำระเงิน</li>
+      <li>รับแจ้งและติดตามงานซ่อม</li>
+      <li>ทำบัญชีรายรับ-รายจ่ายของหอพัก และตรวจสอบย้อนหลัง</li>
+    </ul>
+    <p>หอพักไม่ขาย ไม่ให้เช่า และไม่เปิดเผยข้อมูลแก่บุคคลภายนอก เว้นแต่กฎหมายกำหนด</p>
+
+    <h2>การเก็บรักษาและความปลอดภัย</h2>
+    <ul>
+      <li>ข้อมูลเก็บในบริการของ Google (Firestore, Google Drive) ในบัญชีของหอพัก ไม่เปิดสาธารณะ</li>
+      <li>ผู้เช่าเห็นเฉพาะข้อมูลของห้องตัวเอง เข้าระบบด้วยเลขห้องและ PIN</li>
+      <li>เฉพาะผู้ดูแลที่ได้รับอนุญาตเข้าถึงข้อมูลทั้งหมดได้ และระบบบันทึกการทำงานทุกครั้ง</li>
+      <li>สำรองข้อมูลเป็นประจำ</li>
+    </ul>
+
+    <h2>ระยะเวลาการเก็บ</h2>
+    <p>เก็บตลอดระยะเวลาการเช่า และหลังย้ายออกเท่าที่จำเป็นต่อการบัญชีและข้อกฎหมาย จากนั้นจะลบหรือทำให้ไม่สามารถระบุตัวตนได้</p>
+
+    <h2>สิทธิของเจ้าของข้อมูล</h2>
+    <p>ผู้เช่าขอดู แก้ไข หรือขอลบข้อมูลส่วนบุคคลของตนได้ โดยติดต่อผู้ดูแลหอพัก ตามพระราชบัญญัติคุ้มครองข้อมูลส่วนบุคคล พ.ศ. 2562</p>
+
+    <h2>ติดต่อ</h2>
+    <p>ผู้ดูแลหอพัก หรืออีเมล 224thusboon@gmail.com</p>
+  </div>
+</main>
+</body>
+</html>
