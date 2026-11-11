@@ -14,11 +14,26 @@ const GAS_FILES = [
   'Index.html', 'Styles.html', 'App.html',
 ];
 
+/**
+ * รหัส commit ล่าสุดของ main
+ * อ่านจาก git (ไม่ใช้ api.github.com เพราะ IP ของ Google โดนจำกัดจำนวนครั้งบ่อย)
+ */
+function headSha_() {
+  try {
+    const txt = UrlFetchApp.fetch('https://github.com/' + GITHUB_REPO + '.git/info/refs?service=git-upload-pack').getContentText();
+    const m = txt.match(/([0-9a-f]{40}) refs\/heads\/main/);
+    if (m) return m[1];
+  } catch (e) {
+    Logger.log('อ่าน commit ล่าสุดไม่ได้ ใช้ main แทน: ' + e.message);
+  }
+  return 'main';
+}
+
 function updateFromGitHub() {
   // ดึงตาม commit ล่าสุด (ลิงก์ raw ของ main ถูกแคชไว้ ~5 นาที อาจได้ไฟล์เก่า)
-  const head = JSON.parse(UrlFetchApp.fetch('https://api.github.com/repos/' + GITHUB_REPO + '/commits/main').getContentText());
-  const raw = 'https://raw.githubusercontent.com/' + GITHUB_REPO + '/' + head.sha + '/gas/';
-  Logger.log('commit ' + head.sha.slice(0, 7) + ': ' + head.commit.message.split('\n')[0]);
+  const sha = headSha_();
+  const raw = 'https://raw.githubusercontent.com/' + GITHUB_REPO + '/' + sha + '/gas/';
+  Logger.log('commit ' + sha.slice(0, 7));
   const files = GAS_FILES.map(function (f) {
     const res = UrlFetchApp.fetch(raw + f, { muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) throw new Error('โหลด ' + f + ' ไม่ได้ (' + res.getResponseCode() + ')');
