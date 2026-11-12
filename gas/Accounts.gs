@@ -122,3 +122,190 @@ function apiDeleteEntry(token, id) {
     money_(e.amount) + ' บาท · ' + e.date + (e.note ? ' · ' + e.note : ''));
   return true;
 }
+
+// ---------- ส่งออก Excel ----------
+
+/**
+ * ส่งออกรายงานบัญชี
+ * period: 'YYYY-MM' (รายเดือน) หรือ 'YYYY' (ทั้งปี ค.ศ.)
+ * format: 'xlsx' (Excel) | 'pdf' | 'sheet' (Google Sheets เก็บไว้ในโฟลเดอร์ "รายงานบัญชี" ใน Drive)
+ * xlsx/pdf คืน {name, mimeType, data(base64)} ; sheet คืน {name, url}
+ */
+function apiExportAccounts(token, period, format) {
+  const me = requireSession_(token, 'admin');
+  format = format || 'xlsx';
+  if (['xlsx', 'pdf', 'sheet'].indexOf(format) < 0) throw new Error('รูปแบบไฟล์ไม่ถูกต้อง');
+  period = String(period || '');
+  const isYear = /^\d{4}$/.test(period);
+  if (!isYear && !/^\d{4}-\d{2}$/.test(period)) throw new Error('ช่วงเวลาไม่ถูกต้อง');
+  const settings = getSettings_();
+  const r = fsMulti_([{ list: COL.INVOICES }, { list: COL.REPAIRS }, { list: COL.LEDGER }]);
+  const all = allEntries_(r[0], r[1], r[2]);
+  const inPeriod = function (e) { return isYear ? e.month.slice(0, 4) === period : e.month === period; };
+  const entries = sortBy_(all.filter(inPeriod), 'date', false);
+  const be = isYear ? String(Number(period) + 543) : String(Number(period.slice(0, 4)) + 543) + '-' + period.slice(5);
+  const label = isYear ? 'ปี ' + (Number(period) + 543) : thaiMonth_(period);
+  const title = 'รายงานบัญชีรายรับ-รายจ่าย ' + label;
+
+  const income = sumOf_(entries, 'income'), expense = sumOf_(entries, 'expense');
+  const rent = round2_(entries.filter(function (e) { return e.source === 'invoice'; })
+    .reduce(function (s, e) { return s + (Number(e.amount) || 0); }, 0));
+  const SRC = { invoice: 'ใบแจ้งหนี้ (ยืนยันการโอน)', repair: 'งานซ่อม', manual: 'บันทึกเอง' };
+  const now = Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyy-MM-dd HH:mm');
+
+  // ---- แผ่นที่ 1: สรุป ----
+  const sum = [];
+  sum.push([{ v: settings.dormName || '', b: true, size: 14 }]);
+  sum.push([{ v: title, b: true, size: 12 }]);
+  sum.push(['ส่งออกเมื่อ ' + beDate_(now.slice(0, 10)) + ' ' + now.slice(11) + ' โดย ' + (me.email || me.name || '')]);
+  sum.push([]);
+  sum.push([{ v: 'รายการ', h: true }, { v: 'จำนวนเงิน (บาท)', h: true }]);
+  sum.push(['รายรับค่าเช่า (ยืนยันการโอนแล้ว)', { n: rent }]);
+  sum.push(['รายรับอื่น ๆ', { n: round2_(income - rent) }]);
+  sum.push([{ v: 'รวมรายรับ', b: true }, { n: income, b: true }]);
+  sum.push([{ v: 'รวมรายจ่าย', b: true }, { n: expense, b: true }]);
+  sum.push([{ v: 'คงเหลือ', b: true }, { n: round2_(income - expense), b: true }]);
+  const unpaid = sortBy_(r[0].filter(function (i) { return i.status !== 'paid' && i.status !== 'cancelled'; }), 'month');
+  sum.push(['ค้างรับ ณ วันที่ส่งออก (ทุกเดือน)', { n: round2_(unpaid.reduce(function (s, i) { return s + (Number(i.total) || 0); }, 0)) }]);
+  if (isYear) {
+    sum.push([]);
+    sum.push([{ v: 'เดือน', h: true }, { v: 'รายรับ', h: true }, { v: 'รายจ่าย', h: true }, { v: 'คงเหลือ', h: true }]);
+    const first = sum.length + 1;
+    for (let m = 1; m <= 12; m++) {
+      const ym = period + '-' + ('0' + m).slice(-2);
+      const rows = all.filter(function (e) { return e.month === ym; });
+      const i = sumOf_(rows, 'income'), x = sumOf_(rows, 'expense');
+      sum.push([thaiMonth_(ym), { n: i }, { n: x }, { n: round2_(i - x) }]);
+    }
+    const last = sum.length;
+    sum.push([{ v: 'รวมทั้งปี', b: true }, { f: '=SUM(B' + first + ':B' + last + ')', b: true },
+      { f: '=SUM(C' + first + ':C' + last + ')', b: true }, { f: '=SUM(D' + first + ':D' + last + ')', b: true }]);
+  }
+  sum.push([]);
+  sum.push([{ v: 'ประเภท', h: true }, { v: 'หมวด', h: true }, { v: 'จำนวนรายการ', h: true }, { v: 'จำนวนเงิน (บาท)', h: true }]);
+  ['income', 'expense'].forEach(function (type) {
+    const cats = {};
+    entries.filter(function (e) { return e.type === type; }).forEach(function (e) {
+      const c = cats[e.category || '-'] = cats[e.category || '-'] || { n: 0, amt: 0 };
+      c.n += 1; c.amt = round2_(c.amt + (Number(e.amount) || 0));
+    });
+    Object.keys(cats).sort().forEach(function (k) {
+      sum.push([type === 'income' ? 'รายรับ' : 'รายจ่าย', k, { n: cats[k].n, int: true }, { n: cats[k].amt }]);
+    });
+  });
+
+  // ---- แผ่นที่ 2: รายการ ----
+  const det = [[
+    { v: 'วันที่', h: true }, { v: 'ประเภท', h: true }, { v: 'หมวด', h: true }, { v: 'รายละเอียด', h: true },
+    { v: 'ที่มา', h: true }, { v: 'เลขที่ใบแจ้งหนี้', h: true }, { v: 'เลขที่ใบเสร็จ', h: true },
+    { v: 'รายรับ', h: true }, { v: 'รายจ่าย', h: true },
+  ]];
+  entries.forEach(function (e) {
+    const amt = Number(e.amount) || 0;
+    det.push([
+      beDate_(e.date), e.type === 'income' ? 'รายรับ' : 'รายจ่าย', e.category || '', e.note || '', SRC[e.source] || '',
+      e.invoiceNo || '', e.receiptNo || '',
+      e.type === 'income' ? { n: amt } : '', e.type === 'expense' ? { n: amt } : '',
+    ]);
+  });
+  const dl = det.length;
+  det.push([{ v: 'รวม', b: true }, '', '', '', '', '', '',
+    { f: '=SUM(H2:H' + dl + ')', b: true }, { f: '=SUM(I2:I' + dl + ')', b: true }]);
+
+  const sheets = [
+    { title: 'สรุป', rows: sum, freeze: 0 },
+    { title: 'รายการ', rows: det, freeze: 1 },
+  ];
+  if (!isYear) {
+    const un = [[{ v: 'ห้อง', h: true }, { v: 'บิลเดือน', h: true }, { v: 'เลขที่', h: true }, { v: 'สถานะ', h: true },
+      { v: 'ครบกำหนด', h: true }, { v: 'จำนวนเงิน (บาท)', h: true }]];
+    unpaid.forEach(function (i) {
+      un.push([i.roomId, thaiMonth_(i.month), i.number || '', STATUS_TH_[i.status] || i.status, beDate_(i.dueDate), { n: Number(i.total) || 0 }]);
+    });
+    sheets.push({ title: 'ค้างรับ', rows: un, freeze: 1 });
+  }
+
+  const base = 'บัญชี_' + (settings.dormName || 'หอพัก') + '_' + be;
+  const id = buildSheets_(base, sheets);
+  const FMT_TH = { xlsx: 'Excel', pdf: 'PDF', sheet: 'Google Sheets' };
+  audit_(me, 'ส่งออกบัญชี ' + FMT_TH[format], label, entries.length + ' รายการ');
+  if (format === 'sheet') {
+    // เก็บไว้ในโฟลเดอร์รายงานบัญชี (ส่งออกซ้ำจะได้ไฟล์ใหม่ ไฟล์เดิมยังอยู่)
+    DriveApp.getFileById(id).moveTo(DriveApp.getFolderById(reportFolder_()));
+    return { name: base, url: 'https://docs.google.com/spreadsheets/d/' + id + '/edit' };
+  }
+  try {
+    const url = 'https://docs.google.com/spreadsheets/d/' + id + '/export?format=' + format +
+      (format === 'pdf' ? '&size=A4&portrait=true&fitw=true&gridlines=false&printtitle=false&sheetnames=true&pagenum=CENTER&fzr=true' +
+        '&top_margin=0.5&bottom_margin=0.5&left_margin=0.5&right_margin=0.5' : '');
+    const blob = gFetch_(url).getBlob();
+    return {
+      name: base + '.' + format,
+      mimeType: format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      data: Utilities.base64Encode(blob.getBytes()),
+    };
+  } finally {
+    try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { Logger.log('ลบไฟล์ชั่วคราวไม่ได้: ' + e); }
+  }
+}
+
+/** โฟลเดอร์ "รายงานบัญชี" ใน Drive ของหอ (สร้างครั้งแรก) */
+function reportFolder_() {
+  const s = getSettings_();
+  if (s.reportFolderId) return s.reportFolderId;
+  const id = DriveApp.getFolderById(s.rootFolderId).createFolder('รายงานบัญชี').getId();
+  fsUpdate_(COL.SETTINGS, 'main', { reportFolderId: id });
+  clearSettingsCache_();
+  return id;
+}
+
+/** '2026-11-12' -> '12/11/2569' */
+function beDate_(iso) {
+  if (!iso) return '';
+  const p = String(iso).slice(0, 10).split('-');
+  return Number(p[2]) + '/' + Number(p[1]) + '/' + (Number(p[0]) + 543);
+}
+
+/**
+ * sheets: [{title, rows:[[cell]], freeze}]
+ * cell: 'ข้อความ' | {v:'ข้อความ', b, h, size} | {n:ตัวเลข, b, int} | {f:'=สูตร', b}
+ */
+function buildSheets_(name, sheets) {
+  const HEAD_BG = { red: 0.89, green: 0.93, blue: 0.97 };
+  const body = {
+    properties: { title: name, locale: 'th_TH' },
+    sheets: sheets.map(function (sh, si) {
+      const width = sh.rows.reduce(function (m, r) { return Math.max(m, r.length); }, 1);
+      return {
+        properties: { sheetId: si, title: sh.title, gridProperties: {
+          rowCount: Math.max(sh.rows.length + 5, 20), columnCount: Math.max(width, 4), frozenRowCount: sh.freeze || 0 } },
+        data: [{ startRow: 0, startColumn: 0, rowData: sh.rows.map(function (row) {
+          return { values: row.map(function (c) {
+            if (c === '' || c == null) return {};
+            if (typeof c !== 'object') c = { v: c };
+            const fmt = { textFormat: { fontFamily: 'Sarabun', fontSize: c.size || 11, bold: !!(c.b || c.h) }, verticalAlignment: 'MIDDLE' };
+            const out = { userEnteredFormat: fmt };
+            if (c.h) { fmt.backgroundColor = HEAD_BG; fmt.horizontalAlignment = 'CENTER'; }
+            if (c.n !== undefined) {
+              out.userEnteredValue = { numberValue: Number(c.n) || 0 };
+              fmt.numberFormat = { type: 'NUMBER', pattern: c.int ? '#,##0' : '#,##0.00' };
+            } else if (c.f) {
+              out.userEnteredValue = { formulaValue: c.f };
+              fmt.numberFormat = { type: 'NUMBER', pattern: '#,##0.00' };
+            } else {
+              out.userEnteredValue = { stringValue: String(c.v) };
+            }
+            return out;
+          }) };
+        }) }],
+      };
+    }),
+  };
+  const ss = JSON.parse(gFetch_('https://sheets.googleapis.com/v4/spreadsheets', 'post', body).getContentText());
+  const id = ss.spreadsheetId;
+  const reqs = sheets.map(function (sh, si) {
+    return { autoResizeDimensions: { dimensions: { sheetId: si, dimension: 'COLUMNS', startIndex: 0, endIndex: 12 } } };
+  });
+  gFetch_('https://sheets.googleapis.com/v4/spreadsheets/' + id + ':batchUpdate', 'post', { requests: reqs });
+  return id;
+}

@@ -113,7 +113,7 @@
     });
   }
   // คำสั่งที่แก้ข้อมูล ให้ล้างข้อมูลที่จำไว้ทั้งหมด หน้าถัดไปจะได้ไม่โชว์ของเก่า
-  const READ_ONLY = /^api(Get|List|AdminBootstrap|RoomDetail|TenantHome|WhoAmI|Account)/;
+  const READ_ONLY = /^api(Get|List|AdminBootstrap|RoomDetail|TenantHome|WhoAmI|Account|Export)/;
   async function api(fn, ...args) {
     const res = await run(fn, state.token, ...args);
     if (!READ_ONLY.test(fn)) state.cache = {};
@@ -286,6 +286,18 @@
     for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
     return bytes;
   };
+  // บันทึกไฟล์ลงเครื่อง (ไฟล์จากเซิร์ฟเวอร์แบบ base64)
+  function saveB64(f) {
+    const url = URL.createObjectURL(new Blob([b64bytes(f.data)], { type: f.mimeType }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = f.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
   async function printFiles(files, onProgress) {
     let area = $('#printArea');
     if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
@@ -1039,6 +1051,41 @@
     };
   }
 
+  // ส่งออกรายงานบัญชี: เลือกช่วงเวลา และรูปแบบ Excel / Google Sheets / PDF
+  function exportForm(month) {
+    const year = month.slice(0, 4);
+    const opt = (name, value, label, checked) => `<label class="row" style="font-weight:400;color:var(--text);margin:6px 0">
+      <input type="radio" name="${name}" value="${value}" ${checked ? 'checked' : ''} style="width:auto"> ${label}</label>`;
+    const b = openModal('ส่งออกรายงานบัญชี', `
+      <form id="exForm">
+        <label>ช่วงเวลา</label>
+        ${opt('period', month, 'เดือน ' + thMonth(month), true)}
+        ${opt('period', year, 'ทั้งปี ' + (Number(year) + 543) + ' (สรุปรายเดือน)', false)}
+        <label>รูปแบบ</label>
+        ${opt('format', 'xlsx', 'Excel (.xlsx) ดาวน์โหลดลงเครื่อง', true)}
+        ${opt('format', 'sheet', 'Google Sheets เก็บในโฟลเดอร์ "รายงานบัญชี" ใน Drive', false)}
+        ${opt('format', 'pdf', 'PDF ดาวน์โหลดลงเครื่อง', false)}
+        <p class="muted" style="font-size:14px">ในไฟล์มี: สรุปรายรับ-รายจ่าย แยกตามหมวด, รายการทั้งหมด${''} และรายการค้างรับ (เฉพาะรายเดือน)</p>
+        <div id="exOut"></div>
+        <p><button type="submit">${ic('file')} ส่งออก</button></p>
+      </form>`);
+    $('#exForm', b).onsubmit = (e) => {
+      e.preventDefault();
+      const f = formData(e.target);
+      busy($('button[type=submit]', e.target), async () => {
+        const r = await api('apiExportAccounts', f.period, f.format);
+        if (r.url) {
+          $('#exOut', b).innerHTML = `<div class="card" style="margin:0 0 8px"><strong>สร้าง Google Sheets แล้ว</strong>
+            <div class="muted" style="font-size:14px">${esc(r.name)}</div>
+            <p style="margin:8px 0 0"><a class="btn" href="${esc(r.url)}" target="_blank" rel="noopener">เปิด Google Sheets</a></p></div>`;
+        } else {
+          saveB64(r);
+          toast('ส่งออกแล้ว: ' + r.name);
+        }
+      });
+    };
+  }
+
   // พิมพ์ใบแจ้งหนี้/ใบเสร็จหลายห้องในครั้งเดียว (1 ใบต่อ A4 เรียงตามเลขห้อง)
   function batchPrint(month, invoices) {
     const b = openModal('พิมพ์หลายห้อง · ' + thMonth(month), `
@@ -1301,7 +1348,8 @@
     $('#view').innerHTML = `
       ${sec('บัญชีรายรับ-รายจ่าย', `<input type="month" id="accMon" value="${month}" style="width:auto">
         <button type="button" class="small" id="addIn">${ic('plus')} รายรับ</button>
-        <button type="button" class="small danger" id="addOut">${ic('plus')} รายจ่าย</button>`)}
+        <button type="button" class="small danger" id="addOut">${ic('plus')} รายจ่าย</button>
+        <button type="button" class="small ghost" id="accExport">${ic('file')} ส่งออกรายงาน</button>`)}
       <div class="acc-grid">
         <div class="card"><div class="muted">รายรับ ${thMonth(month)}</div><b class="money-in">${fmt(d.income)}</b>
           <div class="muted" style="font-size:13px">ค่าเช่า ${fmt(d.rentIncome)} · อื่น ๆ ${fmt(d.otherIncome)}</div></div>
@@ -1346,6 +1394,7 @@
         <div class="list-item row spread"><span>ห้อง ${esc(i.roomId)} · บิล ${thMonth(i.month)} · เลขที่ ${esc(i.number || '-')} ${pill(i.status)}</span><strong>${fmt(i.total)}</strong></div>`).join('')}</div>` : ''}`;
 
     $('#accMon').onchange = (e) => { if (e.target.value) { $('#view').innerHTML = '<div class="center muted">กำลังโหลด…</div>'; adminAccounts(e.target.value).catch(fail); } };
+    $('#accExport').onclick = () => exportForm(month);
     $('#addIn').onclick = () => entryForm({ type: 'income', date: month === thisMonth() ? today() : month + '-01' }, d.categories, month);
     $('#addOut').onclick = () => entryForm({ type: 'expense', date: month === thisMonth() ? today() : month + '-01' }, d.categories, month);
     $$('[data-editent]').forEach((b) => { b.onclick = () => entryForm(d.entries.find((x) => x.id === b.dataset.editent), d.categories, month); });
