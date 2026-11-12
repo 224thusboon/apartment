@@ -206,20 +206,21 @@ function templateFor_(settings, kind, style) {
   return id;
 }
 
-function renderInvoicePdf_(settings, inv, style) {
+function renderInvoicePdf_(settings, inv, style, signer) {
   style = docStyle_(settings, style);
   const map = docMap_(settings, inv, {
     docNo: inv.number, docDate: inv.issuedAt,
     notes: String(settings.invoiceNotes || '').split(/\r?\n/), footer: settings.invoiceFooter || '',
   });
-  return renderSheetPdf_(settings, templateFor_(settings, 'invoice', style), 'ใบแจ้งหนี้ ' + inv.roomId + ' ' + inv.month, inv.roomId, map);
+  return renderSheetPdf_(settings, templateFor_(settings, 'invoice', style), 'ใบแจ้งหนี้ ' + inv.roomId + ' ' + inv.month, inv.roomId, map,
+    null, null, { signer: signer, pos: SIGN_POS[style], date: shortDate_(inv.issuedAt) });
 }
 
 /**
  * ใบเสร็จ: รายการเดียวกับใบแจ้งหนี้ อ้างอิงเลขที่ใบแจ้งหนี้
  * label: 'ต้นฉบับ' หรือ 'สำเนา' พิมพ์เป็นกรอบมุมขวาบน
  */
-function renderReceiptPdf_(settings, inv, rc, label, style) {
+function renderReceiptPdf_(settings, inv, rc, label, style, signer) {
   style = docStyle_(settings, style);
   const tid = templateFor_(settings, 'receipt', style);
   const map = docMap_(settings, inv, {
@@ -232,7 +233,7 @@ function renderReceiptPdf_(settings, inv, rc, label, style) {
     footer: '',
   });
   return renderSheetPdf_(settings, tid, 'ใบเสร็จ ' + rc.number + ' ห้อง ' + inv.roomId + (label ? ' (' + label + ')' : ''),
-    inv.roomId, map, label, LABEL_CELL[style]);
+    inv.roomId, map, label, LABEL_CELL[style], { signer: signer, pos: SIGN_POS[style], date: shortDate_(rc.paidAt) });
 }
 
 function docMap_(settings, inv, o) {
@@ -261,8 +262,25 @@ function docMap_(settings, inv, o) {
   return map;
 }
 
-/** คัดลอกแม่แบบ Sheets -> แทนค่า -> export PDF -> ลบสำเนา */
-function renderSheetPdf_(settings, templateId, name, roomId, map, label, labelCell) {
+/**
+ * ตำแหน่งลายเซ็นของแต่ละรูปแบบ
+ * img: แถว/คอลัมน์ (เริ่ม 1) ที่วางรูป + ระยะเลื่อน (px) ; name/date: ช่อง (เริ่ม 0) ที่เขียนชื่อและวันที่
+ */
+const SIGN_POS = {
+  classic: { img: { row: 32, col: 2, x: 72, y: 2, h: 38 }, name: { r: 33, c: 1 }, date: { r: 32, c: 3, label: 'วันที่ ' } },
+  modern: { img: { row: 29, col: 2, x: 92, y: 0, h: 42 }, name: { r: 30, c: 1 }, date: { r: 29, c: 3, label: 'วันที่  ' } },
+};
+
+/** ผู้ลงนามจาก session แอดมิน: {name, fileId, w, h} หรือ null */
+function signer_(me) {
+  if (!me || !me.adminId) return null;
+  const a = fsGet_(COL.ADMINS, me.adminId);
+  if (!a) return null;
+  return { name: a.name || me.name || '', fileId: a.signatureFileId || '', w: Number(a.signatureW) || 0, h: Number(a.signatureH) || 0 };
+}
+
+/** คัดลอกแม่แบบ Sheets -> แทนค่า -> (ลายเซ็น) -> export PDF -> ลบสำเนา */
+function renderSheetPdf_(settings, templateId, name, roomId, map, label, labelCell, sign) {
   const folder = DriveApp.getFolderById(settings.pdfFolderId);
   const copy = DriveApp.getFileById(templateId).makeCopy(name, folder);
   try {
@@ -283,7 +301,33 @@ function renderSheetPdf_(settings, templateId, name, roomId, map, label, labelCe
       } });
       reqs.push({ updateBorders: { range: cell, top: line, bottom: line, left: line, right: line } });
     }
+    const sg = sign && sign.signer && sign.pos ? sign.signer : null;
+    if (sg && sg.name) {
+      // ชื่อผู้ออกเอกสารใต้ลายเซ็น และวันที่
+      const txt = function (pos, text, align) {
+        return { updateCells: {
+          range: { sheetId: 0, startRowIndex: pos.r, endRowIndex: pos.r + 1, startColumnIndex: pos.c, endColumnIndex: pos.c + 1 },
+          fields: 'userEnteredValue,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment',
+          rows: [{ values: [{ userEnteredValue: { stringValue: text }, userEnteredFormat: {
+            horizontalAlignment: align || 'CENTER', textFormat: { fontFamily: 'Sarabun', fontSize: 10 } } }] }],
+        } };
+      };
+      reqs.push(txt(sign.pos.name, '( ' + sg.name + ' )'));
+      if (sign.date) reqs.push(txt(sign.pos.date, sign.pos.date.label + sign.date, 'LEFT'));
+    }
     gFetch_('https://sheets.googleapis.com/v4/spreadsheets/' + copy.getId() + ':batchUpdate', 'post', { requests: reqs });
+    if (sg && sg.fileId) {
+      // วางรูปลายเซ็นเหนือเส้นลงชื่อ
+      try {
+        const p = sign.pos.img;
+        const blob = DriveApp.getFileById(sg.fileId).getBlob();
+        const sh = SpreadsheetApp.openById(copy.getId()).getSheets()[0];
+        const im = sh.insertImage(blob, p.col, p.row, p.x, p.y);
+        const ratio = sg.w && sg.h ? sg.w / sg.h : 3;
+        im.setHeight(p.h).setWidth(Math.min(200, Math.round(p.h * ratio)));
+        SpreadsheetApp.flush();
+      } catch (e) { Logger.log('ใส่ลายเซ็นไม่ได้: ' + e); }
+    }
     const url = 'https://docs.google.com/spreadsheets/d/' + copy.getId() + '/export?format=pdf&size=A4&portrait=true' +
       '&fitw=true&gridlines=false&printtitle=false&sheetnames=false&pagenum=UNDEFINED&fzr=false' +
       '&top_margin=0.4&bottom_margin=0.4&left_margin=0.4&right_margin=0.4&gid=0';
@@ -476,7 +520,8 @@ function createModernTemplate_(folder, kind) {
  * kind: 'invoice' | 'receipt' ; style: 'classic' | 'modern'
  */
 function apiPreviewDoc(token, kind, style) {
-  requireSession_(token, 'admin');
+  const me = requireSession_(token, 'admin');
+  const signer = signer_(me);
   const settings = getSettings_();
   style = docStyle_(settings, style);
   const all = fsList_(COL.INVOICES).filter(function (i) { return i.status !== 'cancelled' && (i.items || []).length; });
@@ -488,8 +533,8 @@ function apiPreviewDoc(token, kind, style) {
     items: [{ name: 'ค่าห้อง', qty: 1, price: 3000, amount: 3000 }, { name: 'ค่าไฟ', qty: 50, price: 8, amount: 400 }, { name: 'ค่าน้ำ', qty: 5, price: 20, amount: 100 }],
   };
   const fileId = kind === 'receipt'
-    ? renderReceiptPdf_(settings, inv, { number: 'ตัวอย่าง', paidAt: today_() }, 'ต้นฉบับ', style)
-    : renderInvoicePdf_(settings, inv, style);
+    ? renderReceiptPdf_(settings, inv, { number: 'ตัวอย่าง', paidAt: today_() }, 'ต้นฉบับ', style, signer)
+    : renderInvoicePdf_(settings, inv, style, signer);
   const f = DriveApp.getFileById(fileId);
   const blob = f.getBlob();
   f.setTrashed(true);

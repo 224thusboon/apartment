@@ -164,7 +164,8 @@ function randomPin_() {
 function apiListAdmins(token) {
   requireSession_(token, 'admin');
   return sortBy_(fsList_(COL.ADMINS), 'email').map(function (a) {
-    return { id: a.id, email: a.email, name: a.name, active: a.active, lastLoginAt: a.lastLoginAt || '', createdBy: a.createdBy || '' };
+    return { id: a.id, email: a.email, name: a.name, active: a.active, lastLoginAt: a.lastLoginAt || '', createdBy: a.createdBy || '',
+      hasSignature: !!a.signatureFileId };
   });
 }
 
@@ -214,4 +215,48 @@ function apiChangeMyPassword(token, oldPw, newPw) {
   });
   audit_(me, 'เปลี่ยนรหัสผ่านตัวเอง', me.email);
   return true;
+}
+
+// ---------- ลายเซ็นผู้ดูแล ----------
+
+/** ลายเซ็นของฉัน: {data(base64 png), w, h} หรือ null */
+function apiGetMySignature(token) {
+  const me = requireSession_(token, 'admin');
+  if (!me.adminId) return null;
+  const a = fsGet_(COL.ADMINS, me.adminId);
+  if (!a || !a.signatureFileId) return null;
+  try {
+    const b = DriveApp.getFileById(a.signatureFileId).getBlob();
+    return { data: Utilities.base64Encode(b.getBytes()), w: a.signatureW || 0, h: a.signatureH || 0 };
+  } catch (e) { return null; }
+}
+
+/** บันทึกลายเซ็นของฉัน (PNG พื้นใส) sig: {data, w, h} ; null = ลบ */
+function apiSaveMySignature(token, sig) {
+  const me = requireSession_(token, 'admin');
+  if (!me.adminId || me.adminId === 'master') throw new Error('เข้าด้วยรหัส master ตั้งลายเซ็นไม่ได้ กรุณาเข้าด้วยอีเมลของตัวเอง');
+  const a = fsGet_(COL.ADMINS, me.adminId);
+  if (!a) throw new Error('ไม่พบผู้ดูแล');
+  if (a.signatureFileId) { try { DriveApp.getFileById(a.signatureFileId).setTrashed(true); } catch (e) { /* ไม่มีไฟล์เดิม */ } }
+  if (!sig) {
+    fsUpdate_(COL.ADMINS, me.adminId, { signatureFileId: '', signatureW: 0, signatureH: 0 });
+    audit_(me, 'ลบลายเซ็น', a.email || '', '');
+    return true;
+  }
+  const bytes = Utilities.base64Decode(sig.data || '');
+  if (!bytes.length || bytes.length > 400 * 1024) throw new Error('ไฟล์ลายเซ็นไม่ถูกต้องหรือใหญ่เกินไป');
+  const f = DriveApp.getFolderById(signFolder_()).createFile(Utilities.newBlob(bytes, 'image/png', 'signature_' + me.adminId + '.png'));
+  f.setDescription('signature:' + me.adminId);
+  fsUpdate_(COL.ADMINS, me.adminId, { signatureFileId: f.getId(), signatureW: Number(sig.w) || 0, signatureH: Number(sig.h) || 0 });
+  audit_(me, 'ตั้งลายเซ็น', a.email || '', '');
+  return true;
+}
+
+function signFolder_() {
+  const s = getSettings_();
+  if (s.signFolderId) return s.signFolderId;
+  const id = DriveApp.getFolderById(s.rootFolderId).createFolder('ลายเซ็นผู้ดูแล').getId();
+  fsUpdate_(COL.SETTINGS, 'main', { signFolderId: id });
+  clearSettingsCache_();
+  return id;
 }

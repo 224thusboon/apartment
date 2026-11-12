@@ -41,7 +41,7 @@ function apiReviewPayment(token, paymentId, approve, note) {
   if (approve) {
     const paidAt = today_();
     fsUpdate_(COL.INVOICES, p.invoiceId, { status: 'paid', paidAt: paidAt });
-    const rc = issueReceipt_(p.invoiceId, paidAt, paymentId);
+    const rc = issueReceipt_(p.invoiceId, paidAt, paymentId, me);
     if (rc) { fsUpdate_(COL.PAYMENTS, paymentId, { receiptId: rc.id, receiptNo: rc.number }); rcNo = rc.number; }
   } else {
     fsUpdate_(COL.INVOICES, p.invoiceId, { status: 'unpaid', paidAt: '' });
@@ -57,7 +57,7 @@ function apiReviewPayment(token, paymentId, approve, note) {
  * ออกใบเสร็จของใบแจ้งหนี้ (ถ้ามีใบที่ยังใช้งานอยู่แล้ว คืนใบเดิม)
  * เลขที่ = พ.ศ.เดือนวันที่ที่ยืนยันการโอน-ลำดับ เช่น 25691105-001
  */
-function issueReceipt_(invoiceId, paidAt, paymentId) {
+function issueReceipt_(invoiceId, paidAt, paymentId, me) {
   const inv = fsGet_(COL.INVOICES, invoiceId);
   if (!inv) return null;
   if (inv.receiptId) {
@@ -71,7 +71,10 @@ function issueReceipt_(invoiceId, paidAt, paymentId) {
     tenantName: inv.tenantName || '', amount: Number(inv.total) || 0, paidAt: paidAt,
     paymentId: paymentId || '', pdfFileId: '', origFileId: '',
   };
-  const f = renderReceiptPair_(s, inv, rc);
+  const signer = signer_(me);
+  rc.issuedBy = signer ? signer.name : '';
+  rc.issuedById = (me && me.adminId) || '';
+  const f = renderReceiptPair_(s, inv, rc, signer);
   rc.pdfFileId = f.copy;
   rc.origFileId = f.orig;
   const saved = fsSet_(COL.RECEIPTS, null, rc);
@@ -86,9 +89,9 @@ function issueReceipt_(invoiceId, paidAt, paymentId) {
  * ใบเสร็จมี 2 ไฟล์: "สำเนา" (ใช้เปิดดู/ดาวน์โหลด/ผู้เช่าพิมพ์) และ "ต้นฉบับ" (แอดมินสั่งพิมพ์เท่านั้น)
  * ไฟล์ต้นฉบับติดแท็ก orig ผู้เช่าเปิดไม่ได้
  */
-function renderReceiptPair_(s, inv, rc) {
-  const copy = renderReceiptPdf_(s, inv, rc, 'สำเนา');
-  const orig = renderReceiptPdf_(s, inv, rc, 'ต้นฉบับ');
+function renderReceiptPair_(s, inv, rc, signer) {
+  const copy = renderReceiptPdf_(s, inv, rc, 'สำเนา', null, signer);
+  const orig = renderReceiptPdf_(s, inv, rc, 'ต้นฉบับ', null, signer);
   DriveApp.getFileById(orig).setDescription('room:' + inv.roomId + '|orig:1');
   return { copy: copy, orig: orig };
 }
@@ -98,7 +101,8 @@ function ensureReceiptPair_(inv, s) {
   if (!inv.receiptId || inv.receiptOrigId) return inv;
   const rc = fsGet_(COL.RECEIPTS, inv.receiptId);
   if (!rc) return inv;
-  const f = renderReceiptPair_(s || getSettings_(), inv, rc);
+  const f = renderReceiptPair_(s || getSettings_(), inv, rc,
+    rc.issuedById ? signer_({ adminId: rc.issuedById }) : null);
   fsUpdate_(COL.RECEIPTS, rc.id, { pdfFileId: f.copy, origFileId: f.orig, oldPdfFileId: rc.pdfFileId || '' });
   const upd = {
     receiptPdfId: f.copy, receiptOrigId: f.orig,

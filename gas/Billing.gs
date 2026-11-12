@@ -174,6 +174,7 @@ function apiGenerateInvoices(token, month, roomIds) {
   const dueIso = Utilities.formatDate(dueDate, 'Asia/Bangkok', 'yyyy-MM-dd');
   const per = monthPeriod_(month);
 
+  const signer = signer_(me);
   const tenants = {};
   fsList_(COL.TENANTS).forEach(function (t) { tenants[t.id] = t; });
 
@@ -204,7 +205,8 @@ function apiGenerateInvoices(token, month, roomIds) {
         status: old && old.status === 'pending' ? 'pending' : 'unpaid',
         issuedAt: per.end, pdfFileId: '',
       };
-      inv.pdfFileId = renderInvoicePdf_(settings, inv);
+      inv.issuedBy = signer ? signer.name : '';
+      inv.pdfFileId = renderInvoicePdf_(settings, inv, null, signer);
       fsSet_(COL.INVOICES, id, inv);
       return { roomId: row.roomId, ok: true, total: calc.total };
     } catch (err) {
@@ -305,7 +307,7 @@ function apiSetInvoiceStatus(token, invoiceId, status) {
   if (status === 'paid') {
     const paidAt = inv.status === 'paid' && inv.paidAt ? inv.paidAt : today_();
     fsUpdate_(COL.INVOICES, invoiceId, { status: 'paid', paidAt: paidAt });
-    issueReceipt_(invoiceId, paidAt, '');
+    issueReceipt_(invoiceId, paidAt, '', me);
   } else {
     fsUpdate_(COL.INVOICES, invoiceId, { status: status, paidAt: '' });
     if (inv.receiptId) voidReceipt_(invoiceId, 'เปลี่ยนสถานะใบแจ้งหนี้เป็น ' + status);
@@ -344,7 +346,9 @@ function apiUpdateInvoice(token, invoiceId, data) {
   if (inv.pdfFileId) {
     try { DriveApp.getFileById(inv.pdfFileId).setTrashed(true); } catch (e) { /* ไม่มีไฟล์ */ }
   }
-  upd.pdfFileId = renderInvoicePdf_(settings, upd);
+  const signer = signer_(me);
+  upd.issuedBy = signer ? signer.name : (upd.issuedBy || '');
+  upd.pdfFileId = renderInvoicePdf_(settings, upd, null, signer);
   delete upd.id;
   fsSet_(COL.INVOICES, invoiceId, upd);
   audit_(me, 'แก้ไขใบแจ้งหนี้', 'ใบแจ้งหนี้ ' + number + ' ห้อง ' + inv.roomId,
