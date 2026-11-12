@@ -529,6 +529,7 @@
           <div style="font-size:14px">${d.rooms.filter((r) => r.due && r.due.overdue > 0).map((r) => `ห้อง ${esc(r.number)} (${r.due.overdueDays} วัน)`).join(' · ')}</div></div>
         <button type="button" class="small danger" id="showOverdue">ดูห้อง</button></div>` : ''}
       ${sec('ห้องทั้งหมด', `
+        <button type="button" class="small" id="addRooms">${ic('plus')} เพิ่มห้อง</button>
         <div class="filters">
           ${[['all', 'ทั้งหมด'], ['occupied', 'มีผู้เช่า'], ['vacant', 'ว่าง'], ['overdue', 'ค้างชำระ'], ['maintenance', 'ปิดปรับปรุง']].map(([k, l]) => `<button type="button" class="small ${filter === k ? 'on' : ''}" data-f="${k}">${l}</button>`).join('')}
         </div>`)}
@@ -554,6 +555,31 @@
     $('#hGoBill').onclick = () => go('billing');
     $('#hGoPay').onclick = () => go('payments');
     if ($('#showOverdue')) $('#showOverdue').onclick = () => { state.roomFilter = 'overdue'; adminRooms(true); };
+    $('#addRooms').onclick = () => addRoomsForm();
+  }
+
+  function addRoomsForm() {
+    const b = openModal('เพิ่มห้อง', `
+      <form id="arForm">
+        <label>เลขห้อง</label>
+        <input name="ids" required placeholder="เช่น 501 หรือ 501-506 หรือ 501, 502, 503">
+        <p class="muted" style="font-size:14px;margin-top:4px">เพิ่มหลายห้องได้ คั่นด้วยจุลภาค หรือใส่เป็นช่วง เช่น 501-506</p>
+        <div class="grid2">
+          <div><label>ค่าเช่ามาตรฐาน (บาท/เดือน)</label><input name="rent" type="number" value="3000" required></div>
+          <div><label>เงินประกันมาตรฐาน (บาท)</label><input name="deposit" type="number" value="3000"></div>
+        </div>
+        <p><button type="submit">${ic('plus')} เพิ่มห้อง</button></p>
+      </form>`);
+    $('#arForm', b).onsubmit = (e) => {
+      e.preventDefault();
+      const f = formData(e.target);
+      busy($('button[type=submit]', e.target), async () => {
+        const ids = await api('apiAddRooms', f);
+        toast('เพิ่มห้องแล้ว: ' + ids.join(', '));
+        closeModal();
+        adminRooms();
+      });
+    };
     if ($('#hGoRep')) $('#hGoRep').onclick = () => go('repairs');
   }
 
@@ -617,7 +643,8 @@
           ${['vacant', 'occupied', 'maintenance'].map((s) => `<option value="${s}" ${r.status === s ? 'selected' : ''}>${STATUS[s]}</option>`).join('')}
         </select>
         <label>หมายเหตุ</label><textarea name="note">${esc(r.note)}</textarea>
-        <p><button type="submit" class="ghost">บันทึกข้อมูลห้อง</button></p>
+        <p class="row"><button type="submit" class="ghost">บันทึกข้อมูลห้อง</button>
+          ${!d.tenancies.length && !d.invoices.length && !d.repairs.length ? `<button type="button" class="ghost" id="delRoom" style="color:var(--bad);border-color:var(--bad)">ลบห้องนี้</button>` : ''}</p>
       </form>
 
       <h3>ประวัติการเข้าพัก</h3>
@@ -662,6 +689,10 @@
       busy($('button[type=submit]', e.target), async () => { await api('apiSaveRoom', f); toast('บันทึกแล้ว'); refresh(); });
     };
     $('#btnAddRepair', body).onclick = () => repairForm({ roomId });
+    if ($('#delRoom', body)) $('#delRoom', body).onclick = (e) => {
+      if (!confirm('ลบห้อง ' + roomId + ' ออกจากระบบ?')) return;
+      busy(e.target, async () => { await api('apiDeleteRoom', roomId); toast('ลบห้อง ' + roomId + ' แล้ว'); closeModal(); adminRooms(); });
+    };
     $$('[data-delcharge2]', body).forEach((b) => {
       b.onclick = () => {
         if (!confirm('ลบรายการนี้?')) return;

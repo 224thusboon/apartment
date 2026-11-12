@@ -39,7 +39,7 @@ function apiAdminBootstrap(token) {
     x.moveIn = t ? t.moveIn : '';
     x.due = due[x.id] || null;
   });
-  rooms.sort(function (a, b) { return Number(a.number) - Number(b.number); });
+  rooms.sort(function (a, b) { return roomCmp_(a.number, b.number); });
   const pendingPayments = r[2].length;
   const openRepairs = r[3].filter(function (x) { return x.status !== 'done'; }).length;
   const overdueRooms = rooms.filter(function (x) { return x.due && x.due.overdue > 0; });
@@ -66,6 +66,71 @@ function apiRoomDetail(token, roomId) {
     invoices: sortBy_(r[3].filter(function (i) { return i.status !== 'cancelled'; }), 'month', true),
     charges: sortBy_(r[4], 'month', true),
   };
+}
+
+/** เรียงเลขห้องแบบตัวเลข (101 < 102 < 1001) รองรับเลขห้องที่มีตัวอักษร */
+function roomCmp_(a, b) {
+  return String(a).localeCompare(String(b), 'en', { numeric: true });
+}
+
+/**
+ * เพิ่มห้องใหม่ (ทีละหลายห้องได้)
+ * data: {ids: '501, 502, 503' หรือ '501-505', rent, deposit}
+ */
+function apiAddRooms(token, data) {
+  const me = requireSession_(token, 'admin');
+  const ids = parseRoomIds_(data.ids);
+  if (!ids.length) throw new Error('กรุณาระบุเลขห้อง');
+  if (ids.length > 100) throw new Error('เพิ่มได้ครั้งละไม่เกิน 100 ห้อง');
+  const existing = fsMulti_(ids.map(function (id) { return { get: [COL.ROOMS, id] }; }));
+  const dup = ids.filter(function (id, i) { return existing[i]; });
+  if (dup.length) throw new Error('มีห้องนี้อยู่แล้ว: ' + dup.join(', '));
+  const rent = Number(data.rent) || 0, deposit = Number(data.deposit) || 0;
+  const docs = {};
+  ids.forEach(function (id) {
+    const n = Number(id);
+    docs[id] = {
+      number: id, floor: isNaN(n) ? '' : Math.floor(n / 100), rent: rent, deposit: deposit,
+      status: 'vacant', currentTenancyId: '', note: '', createdAt: new Date(),
+    };
+  });
+  fsSetMany_(COL.ROOMS, docs);
+  audit_(me, 'เพิ่มห้อง', ids.length + ' ห้อง', ids.join(', ') + ' · ค่าเช่า ' + rent + ' ประกัน ' + deposit);
+  return ids;
+}
+
+/** '501, 502' / '501-505' / '501 502' -> ['501','502',...] */
+function parseRoomIds_(text) {
+  const out = [];
+  String(text || '').split(/[,\s]+/).forEach(function (p) {
+    if (!p) return;
+    const m = p.match(/^(\d+)-(\d+)$/);
+    if (m) {
+      const a = Number(m[1]), b = Number(m[2]);
+      if (b < a || b - a > 100) throw new Error('ช่วงเลขห้องไม่ถูกต้อง: ' + p);
+      for (let i = a; i <= b; i++) out.push(String(i));
+      return;
+    }
+    if (!/^[A-Za-z0-9ก-๙]{1,10}$/.test(p)) throw new Error('เลขห้องไม่ถูกต้อง: ' + p);
+    out.push(p);
+  });
+  return out.filter(function (x, i) { return out.indexOf(x) === i; });
+}
+
+/** ลบห้องได้เฉพาะห้องที่ไม่เคยมีผู้เช่า/บิล/งานซ่อม (กันลบประวัติ) */
+function apiDeleteRoom(token, roomId) {
+  const me = requireSession_(token, 'admin');
+  const r = fsMulti_([
+    { get: [COL.ROOMS, roomId] },
+    { where: [COL.TENANCIES, { roomId: roomId }] },
+    { where: [COL.INVOICES, { roomId: roomId }] },
+    { where: [COL.REPAIRS, { roomId: roomId }] },
+  ]);
+  if (!r[0]) throw new Error('ไม่พบห้อง');
+  if (r[1].length || r[2].length || r[3].length) throw new Error('ห้องนี้มีประวัติแล้ว ลบไม่ได้ (เปลี่ยนสถานะเป็นปิดปรับปรุงแทนได้)');
+  fsDelete_(COL.ROOMS, roomId);
+  audit_(me, 'ลบห้อง', 'ห้อง ' + roomId, '');
+  return true;
 }
 
 function apiSaveRoom(token, room) {

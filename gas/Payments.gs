@@ -131,7 +131,7 @@ function apiPrintDocs(token, invoiceIds, kind) {
   const s = getSettings_();
   const invs = fsMulti_(invoiceIds.map(function (id) { return { get: [COL.INVOICES, id] }; }))
     .filter(function (i) { return i && i.status !== 'cancelled'; })
-    .sort(function (a, b) { return Number(a.roomId) - Number(b.roomId); });
+    .sort(function (a, b) { return roomCmp_(a.roomId, b.roomId); });
   const out = [], nos = [];
   invs.forEach(function (inv) {
     let fileId;
