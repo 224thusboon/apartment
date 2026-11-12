@@ -1658,7 +1658,11 @@
         <div class="list-item row spread"><span>${esc(b.name)}</span><span class="muted" style="font-size:13px">${thDate(b.at)} · ${fmt(b.size / 1024)} KB</span></div>`).join('') : '<span class="muted">ยังไม่มีไฟล์สำรอง</span>'}</div>
 
       ${sec('บันทึกการทำงาน', `<input type="month" id="auditMon" value="${auditMonth}" style="width:auto">`)}
-      ${logs.length ? `<p class="muted" style="font-size:13px;margin:-6px 0 8px">${logs.length} รายการ · เลื่อนในกรอบเพื่อดูรายการเก่า</p>` : ''}
+      <div class="row spread" style="margin:-6px 0 8px">
+        <span class="muted" style="font-size:13px">${logs.length ? logs.length + ' รายการ · เลื่อนในกรอบเพื่อดูรายการเก่า · ' : ''}ระบบเก็บไว้ 120 วัน</span>
+        <span class="row"><button type="button" class="small ghost" data-logtxt="month">${ic('file')} .txt เดือนนี้</button>
+          <button type="button" class="small ghost" data-logtxt="all">${ic('file')} .txt ทั้งหมด</button></span>
+      </div>
       <div class="card log-box">${logs.length ? `<table style="font-size:14px">
         <thead><tr><th>เวลา</th><th>ผู้ทำ</th><th>การทำงาน</th><th>รายละเอียด</th></tr></thead>
         <tbody>${logs.map((l) => `<tr>
@@ -1671,6 +1675,30 @@
     if ($('#mySig')) $('#mySig').onclick = () => signatureForm(() => loadSystemPanel(auditMonth));
     $$('[data-editadmin]').forEach((b) => { b.onclick = () => adminForm(admins.find((x) => x.id === b.dataset.editadmin)); });
     $('#auditMon').onchange = (e) => e.target.value && loadSystemPanel(e.target.value);
+    // ส่งออกบันทึกการทำงานเป็นไฟล์ข้อความ (UTF-8 เปิดใน Notepad ได้)
+    $$('[data-logtxt]').forEach((b) => {
+      b.onclick = () => busy(b, async () => {
+        const all = b.dataset.logtxt === 'all';
+        const rows = all ? await api('apiListAudit', 'all') : logs;
+        const t = (iso) => { const d = new Date(iso); return thDate(iso) + ' ' + d.toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit', second: '2-digit' }); };
+        const lines = [
+          'บันทึกการทำงาน ' + (state.admin && state.admin.settings ? state.admin.settings.dormName : '') + ' · ' + (all ? 'ทั้งหมดที่เก็บไว้ (120 วัน)' : thMonth(auditMonth)),
+          'ส่งออกเมื่อ ' + t(new Date().toISOString()) + ' · ' + rows.length + ' รายการ',
+          '',
+          ['เวลา', 'ผู้ทำ', 'อีเมล', 'ห้อง', 'การทำงาน', 'เป้าหมาย', 'รายละเอียด'].join('\t'),
+          ...rows.map((l) => [t(l.at), l.name, l.email, l.roomId, l.action, l.target, l.detail]
+            .map((x) => String(x == null ? '' : x).replace(/[\t\r\n]+/g, ' ')).join('\t')),
+        ];
+        const blob = new Blob(['﻿' + lines.join('\r\n')], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'log_' + (all ? 'ทั้งหมด' : auditMonth) + '.txt';
+        document.body.appendChild(a); a.click(); a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+        toast('ส่งออกแล้ว ' + rows.length + ' รายการ');
+      });
+    });
     $('#backupNow').onclick = (e) => busy(e.target, async () => { const n = await api('apiBackupNow'); toast('สำรองแล้ว: ' + n); loadSystemPanel(auditMonth); });
     if ($('#myPw')) $('#myPw').onclick = () => myPasswordForm();
   }

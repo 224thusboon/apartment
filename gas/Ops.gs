@@ -25,9 +25,26 @@ function audit_(who, action, target, detail) {
   }
 }
 
+/** month: 'YYYY-MM' หรือ 'all' (ทั้งหมดที่เก็บไว้) */
 function apiListAudit(token, month) {
   requireSession_(token, 'admin');
-  return sortBy_(fsWhere_(COL.AUDIT, { month: month }), 'at', true);
+  const rows = month === 'all' ? fsList_(COL.AUDIT) : fsWhere_(COL.AUDIT, { month: month });
+  return sortBy_(rows, 'at', true);
+}
+
+const AUDIT_KEEP_DAYS = 120; // เก็บบันทึกการทำงาน 120 วัน
+
+/** ลบบันทึกการทำงานที่เก่ากว่า AUDIT_KEEP_DAYS (เรียกจาก weeklyBackup หลังสำรองข้อมูลแล้ว) */
+function purgeAudit_() {
+  const cutoff = new Date(Date.now() - AUDIT_KEEP_DAYS * 864e5).toISOString();
+  const old = fsList_(COL.AUDIT).filter(function (a) { return a.at && a.at < cutoff; });
+  const base = fsBase_();
+  for (let i = 0; i < old.length; i += 50) {
+    UrlFetchApp.fetchAll(old.slice(i, i + 50).map(function (a) {
+      return fsReq_(base + '/' + COL.AUDIT + '/' + encodeURIComponent(a.id), 'delete');
+    }));
+  }
+  return old.length;
 }
 
 // ---------- สำรองข้อมูล ----------
@@ -37,7 +54,10 @@ const BACKUP_KEEP = 12; // เก็บไฟล์สำรองล่าส�
 /** ตั้ง trigger รายสัปดาห์ให้เรียกฟังก์ชันนี้ (ตั้งที่เมนู ทริกเกอร์ ใน Apps Script) */
 function weeklyBackup() {
   const name = backupFirestore_();
-  audit_({ role: 'system', name: 'ระบบ' }, 'สำรองข้อมูลอัตโนมัติ', name);
+  let purged = 0;
+  try { purged = purgeAudit_(); } catch (e) { Logger.log('ลบบันทึกเก่าไม่สำเร็จ: ' + e.message); }
+  audit_({ role: 'system', name: 'ระบบ' }, 'สำรองข้อมูลอัตโนมัติ', name,
+    purged ? 'ลบบันทึกการทำงานเก่ากว่า ' + AUDIT_KEEP_DAYS + ' วัน ' + purged + ' รายการ' : '');
 }
 
 function apiBackupNow(token) {
