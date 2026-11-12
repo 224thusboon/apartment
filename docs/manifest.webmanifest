@@ -1,6 +1,6 @@
 {
-  "name": "หอพัก",
-  "short_name": "หอพัก",
+  "name": "ระบบหอพัก",
+  "short_name": "ระบบหอพัก",
   "lang": "th",
   "start_url": "./?source=pwa",
   "scope": "./",

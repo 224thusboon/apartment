@@ -30,7 +30,7 @@ const COL = {
 
 /** ค่าเริ่มต้น (ค่าสมมติ) — แก้จริงในหน้าตั้งค่า */
 const DEFAULT_SETTINGS = {
-  dormName: 'หอพักตัวอย่าง',
+  dormName: 'ระบบหอพัก',
   dormAddress: 'ที่อยู่หอพัก (แก้ในหน้าตั้งค่า)',
   ownerName: 'ชื่อผู้ให้เช่า',
   phone: '-',
