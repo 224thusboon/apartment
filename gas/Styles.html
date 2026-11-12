@@ -191,11 +191,11 @@
   /* ตารางจดมิเตอร์: แถวแบบกริด คอมเป็นแถวเดียว มือถือเป็นการ์ด */
   .meter { display: grid; gap: 10px; margin-bottom: 14px; }
   .mrow { display: grid; gap: 12px 14px; align-items: center; margin: 0; padding: 14px 16px;
-    grid-template-columns: 1fr auto; grid-template-areas: "room bill" "water electric" "charges charges"; }
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "room bill" "water electric" "charges charges"; }
   .mrow.mhead { display: none; }
-  .mroom { grid-area: room; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .mroom { grid-area: room; display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
   .mno { font-family: var(--head); font-size: 20px; font-weight: 700; }
-  .mname { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .mname { color: var(--muted); font-size: 14px; line-height: 1.35; min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
   .mcell[data-kind=water] { grid-area: water; } .mcell[data-kind=electric] { grid-area: electric; }
   .mcell { min-width: 0; }
   .mlab { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
@@ -203,8 +203,9 @@
   .min { display: flex; align-items: center; gap: 6px; }
   .mprev { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; white-space: nowrap; }
   .marrow { color: var(--muted); font-size: 13px; }
-  .min input { padding: 8px 10px; min-width: 0; width: 100%; max-width: 130px; font-variant-numeric: tabular-nums; }
-  .muse { display: block; font-size: 12px; color: var(--accent); margin-top: 4px; min-height: 16px; white-space: nowrap; }
+  .min input { padding: 8px 10px; min-width: 0; width: 100%; font-variant-numeric: tabular-nums; }
+  @media (min-width: 900px) { .min input { max-width: 130px; } }
+  .muse { display: block; font-size: 12px; line-height: 1.35; color: var(--accent); margin-top: 4px; min-height: 16px; }
   .mcell.bad input { border-color: var(--bad); }
   .mcell.bad .muse { color: var(--bad); }
   .mcharges { grid-area: charges; min-width: 0; }
@@ -225,7 +226,6 @@
     .mrow.mhead span:nth-child(5) { grid-area: bill; justify-content: flex-end; }
     .mrow.mhead svg.i { width: 15px; height: 15px; }
     .mrow .mlab { display: none; }
-    .mroom { flex-direction: column; align-items: flex-start; gap: 0; }
   }
   .money-in { color: var(--ok); }
   .money-out { color: var(--bad); }
