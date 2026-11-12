@@ -107,11 +107,14 @@ function calcInvoice_(settings, room, tenancy, prevR, curR, month, extra) {
  * ออกใบแจ้งหนี้ทุกห้องที่จดมิเตอร์แล้ว (ข้ามห้องที่ชำระแล้ว)
  * คืน [{roomId, ok, total|error}]
  */
-function apiGenerateInvoices(token, month) {
+function apiGenerateInvoices(token, month, roomIds) {
   const me = requireSession_(token, 'admin');
   const settings = getSettings_();
   const ms = monthSheet_(month);
-  const sheet = ms.rows;
+  // roomIds (ไม่บังคับ): ออกเฉพาะห้องที่ระบุ
+  const sheet = roomIds && roomIds.length
+    ? ms.rows.filter(function (r) { return roomIds.indexOf(r.roomId) >= 0; })
+    : ms.rows;
   const p = month.split('-').map(Number);
   // วันครบกำหนด = วันที่ dueDay ของเดือนถัดไป
   const dueDate = new Date(p[0], p[1], settings.dueDay);

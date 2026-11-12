@@ -836,7 +836,8 @@
               <td class="num">${fmt(r.prevElectric)}</td>
               <td><input name="electric" type="number" step="any" inputmode="decimal" value="${esc(r.electric)}"></td>
               <td>${chargeCell(r.roomId)}</td>
-              <td>${r.invoiceStatus ? pill(r.invoiceStatus) : '<span class="muted">-</span>'}</td>
+              <td><div class="row" style="flex-wrap:nowrap">${r.invoiceStatus && r.invoiceStatus !== 'cancelled' ? pill(r.invoiceStatus) : ''}
+                ${r.invoiceStatus === 'paid' ? '' : `<button type="button" class="small ghost" data-genroom="${esc(r.roomId)}">${ic('bill')} ${r.invoiceStatus && r.invoiceStatus !== 'cancelled' ? 'ออกใหม่' : 'ออกบิล'}</button>`}</div></td>
             </tr>`).join('')}</tbody></table>` : '<p class="muted">ยังไม่มีห้องที่มีผู้เช่า</p>'}
       </div>
       <div class="row">
@@ -872,6 +873,23 @@
     const collect = () => $$('#meter tbody tr').map((tr) => ({
       roomId: tr.dataset.room, water: $('[name=water]', tr).value, electric: $('[name=electric]', tr).value,
     }));
+    // ออกใบแจ้งหนี้ทีละห้อง (บันทึกเลขมิเตอร์ของแถวนั้นก่อน)
+    $$('[data-genroom]').forEach((b) => {
+      b.onclick = async () => {
+        const roomId = b.dataset.genroom;
+        const row = collect().find((x) => x.roomId === roomId);
+        if (row.water === '' || row.electric === '') { toast('กรอกเลขมิเตอร์น้ำและไฟของห้อง ' + roomId + ' ก่อน', true); return; }
+        const again = b.textContent.indexOf('ออกใหม่') >= 0;
+        if (!(await ask(again ? `ออกใบแจ้งหนี้ห้อง ${roomId} ใหม่? ใบเดิมจะถูกแทนที่ (เลขที่เดิม)` : `ออกใบแจ้งหนี้ห้อง ${roomId}?`, { ok: 'ออกใบแจ้งหนี้' }))) return;
+        busy(b, async () => {
+          await api('apiSaveReadings', month, [row]);
+          const res = await api('apiGenerateInvoices', month, [roomId]);
+          const r = res[0] || {};
+          if (r.ok) toast(`ออกใบแจ้งหนี้ห้อง ${roomId} แล้ว ${fmt(r.total)} บาท`); else toast(`ห้อง ${roomId}: ${r.error || 'ออกไม่ได้'}`, true);
+          await adminBilling(month);
+        });
+      };
+    });
     $('#saveMeter').onclick = (e) => busy(e.target, async () => { await api('apiSaveReadings', month, collect()); toast('บันทึกเลขมิเตอร์แล้ว'); });
     $('#genInv').onclick = async (e) => {
       const btn = e.currentTarget;
