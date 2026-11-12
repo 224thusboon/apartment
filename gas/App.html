@@ -334,6 +334,7 @@
               if (r[0]) src.dataset.orig = r[0].origPrints;
               info();
               state.cache = {};
+              if (state.tab === 'billing') adminBilling(state.billMonth);
             } catch (err) { fail(err); }
             btn.disabled = false;
             if (btn.id !== 'btnOrig') btn.innerHTML = old;
