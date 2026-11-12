@@ -161,6 +161,36 @@
     $('#modal').classList.remove('hidden');
     return $('#modalBody');
   }
+  // กล่องยืนยัน/ถามข้อความของแอปเอง (confirm/prompt ของเบราว์เซอร์ถูกปิดเงียบในบางที่ เช่น หน้าต่างฝัง)
+  // คืน true/false หรือข้อความ (null = ยกเลิก)
+  function ask(msg, opt) {
+    opt = opt || {};
+    return new Promise((resolve) => {
+      const w = document.createElement('div');
+      w.className = 'ask-wrap';
+      w.innerHTML = `<div class="ask card" role="dialog" aria-modal="true">
+        <p class="ask-msg">${esc(msg)}</p>
+        ${opt.input ? `<input class="ask-in" value="${esc(opt.value || '')}">` : ''}
+        <div class="row" style="justify-content:flex-end;margin-top:14px">
+          <button type="button" class="ghost ask-no">ยกเลิก</button>
+          <button type="button" class="ask-ok${opt.danger ? ' danger' : ''}">${esc(opt.ok || 'ตกลง')}</button>
+        </div></div>`;
+      document.body.appendChild(w);
+      const inp = $('.ask-in', w);
+      const cancel = opt.input ? null : false;
+      const done = (v) => { w.remove(); resolve(v); };
+      $('.ask-no', w).onclick = () => done(cancel);
+      $('.ask-ok', w).onclick = () => done(opt.input ? inp.value : true);
+      w.onclick = (e) => { if (e.target === w) done(cancel); };
+      w.onkeydown = (e) => {
+        if (e.key === 'Escape') done(cancel);
+        if (e.key === 'Enter' && opt.input) done(inp.value);
+      };
+      (inp || $('.ask-ok', w)).focus();
+    });
+  }
+  const askText = (msg, value) => ask(msg, { input: true, value: value });
+
   function closeModal() {
     $('#modal').classList.add('hidden');
     $('#modalBody').innerHTML = '';
@@ -325,7 +355,7 @@
         info();
         const run = (btn, kind) => {
           btn.onclick = async () => {
-            if (kind === 'original' && Number(src.dataset.orig) > 0 && !confirm('ใบเสร็จนี้พิมพ์ต้นฉบับไปแล้ว ต้องการออกต้นฉบับซ้ำ?')) return;
+            if (kind === 'original' && Number(src.dataset.orig) > 0 && !(await ask('ใบเสร็จนี้พิมพ์ต้นฉบับไปแล้ว ต้องการออกต้นฉบับซ้ำ?', { ok: 'พิมพ์ต้นฉบับซ้ำ' }))) return;
             const old = btn.innerHTML;
             btn.disabled = true;
             btn.textContent = 'กำลังเตรียมพิมพ์…';
@@ -689,13 +719,14 @@
       busy($('button[type=submit]', e.target), async () => { await api('apiSaveRoom', f); toast('บันทึกแล้ว'); refresh(); });
     };
     $('#btnAddRepair', body).onclick = () => repairForm({ roomId });
-    if ($('#delRoom', body)) $('#delRoom', body).onclick = (e) => {
-      if (!confirm('ลบห้อง ' + roomId + ' ออกจากระบบ?')) return;
-      busy(e.target, async () => { await api('apiDeleteRoom', roomId); toast('ลบห้อง ' + roomId + ' แล้ว'); closeModal(); adminRooms(); });
+    if ($('#delRoom', body)) $('#delRoom', body).onclick = async (e) => {
+      const btn = e.target;
+      if (!(await ask('ลบห้อง ' + roomId + ' ออกจากระบบ?', { ok: 'ลบห้อง', danger: true }))) return;
+      busy(btn, async () => { await api('apiDeleteRoom', roomId); toast('ลบห้อง ' + roomId + ' แล้ว'); closeModal(); adminRooms(); });
     };
     $$('[data-delcharge2]', body).forEach((b) => {
-      b.onclick = () => {
-        if (!confirm('ลบรายการนี้?')) return;
+      b.onclick = async () => {
+        if (!(await ask('ลบรายการนี้?', { ok: 'ลบ', danger: true }))) return;
         busy(b, async () => { await api('apiDeleteCharge', b.dataset.delcharge2); toast('ลบแล้ว'); openRoom(roomId); });
       };
     });
@@ -726,9 +757,10 @@
       });
       $('#btnCharge', body).onclick = () => chargeForm({ roomId, reopenRoom: true });
       $('#btnCharge2', body).onclick = () => chargeForm({ roomId, reopenRoom: true });
-      $('#btnPin', body).onclick = (e) => {
-        if (!confirm('ออก PIN ใหม่? PIN เดิมจะใช้ไม่ได้ทันที')) return;
-        busy(e.target, async () => showPin(roomId, (await api('apiResetPin', roomId)).pin));
+      $('#btnPin', body).onclick = async (e) => {
+        const btn = e.target;
+        if (!(await ask('ออก PIN ใหม่? PIN เดิมจะใช้ไม่ได้ทันที', { ok: 'ออก PIN ใหม่' }))) return;
+        busy(btn, async () => showPin(roomId, (await api('apiResetPin', roomId)).pin));
       };
       $('#btnOut', body).onclick = () => {
         const b = openModal('ย้ายออก ห้อง ' + roomId, `
@@ -841,9 +873,10 @@
       roomId: tr.dataset.room, water: $('[name=water]', tr).value, electric: $('[name=electric]', tr).value,
     }));
     $('#saveMeter').onclick = (e) => busy(e.target, async () => { await api('apiSaveReadings', month, collect()); toast('บันทึกเลขมิเตอร์แล้ว'); });
-    $('#genInv').onclick = (e) => {
-      if (!confirm('ออกใบแจ้งหนี้ทุกห้องที่จดมิเตอร์แล้ว?')) return;
-      busy(e.target, async () => {
+    $('#genInv').onclick = async (e) => {
+      const btn = e.currentTarget;
+      if (!(await ask('ออกใบแจ้งหนี้ทุกห้องที่จดมิเตอร์แล้ว?', { ok: 'ออกใบแจ้งหนี้' }))) return;
+      busy(btn, async () => {
         await api('apiSaveReadings', month, collect());
         const res = await api('apiGenerateInvoices', month);
         await adminBilling(month);
@@ -857,16 +890,16 @@
     });
     $$('[data-addcharge]').forEach((b) => { b.onclick = () => chargeForm({ month, roomId: b.dataset.addcharge }); });
     $$('[data-delcharge]').forEach((b) => {
-      b.onclick = () => {
-        if (!confirm('ลบรายการนี้?')) return;
+      b.onclick = async () => {
+        if (!(await ask('ลบรายการนี้?', { ok: 'ลบ', danger: true }))) return;
         busy(b, async () => { await api('apiDeleteCharge', b.dataset.delcharge); toast('ลบแล้ว'); adminBilling(month); });
       };
     });
     $$('[data-editinv]').forEach((b) => { b.onclick = () => invoiceForm(invoices.find((x) => x.id === b.dataset.editinv), month); });
     $$('[data-cancelinv]').forEach((b) => {
-      b.onclick = () => {
+      b.onclick = async () => {
         const inv = invoices.find((x) => x.id === b.dataset.cancelinv);
-        const reason = prompt(`ยกเลิกใบแจ้งหนี้เลขที่ ${inv.number || '-'} ห้อง ${inv.roomId}?\nเหตุผล (ไม่บังคับ):`, '');
+        const reason = await askText(`ยกเลิกใบแจ้งหนี้เลขที่ ${inv.number || '-'} ห้อง ${inv.roomId}?\nเหตุผล (ไม่บังคับ):`, '');
         if (reason === null) return;
         busy(b, async () => { await api('apiCancelInvoice', inv.id, reason); toast('ยกเลิกแล้ว กดออกใบแจ้งหนี้ใหม่ได้'); adminBilling(month); });
       };
@@ -918,7 +951,7 @@
       const k = kind();
       if (k === 'original') {
         const again = invoices.filter((i) => ids.indexOf(i.id) >= 0 && Number(i.receiptOrigPrints) > 0).map((i) => i.roomId);
-        if (again.length && !confirm(`ห้อง ${again.join(', ')} พิมพ์ต้นฉบับไปแล้ว ต้องการออกต้นฉบับซ้ำ?`)) return;
+        if (again.length && !(await ask(`ห้อง ${again.join(', ')} พิมพ์ต้นฉบับไปแล้ว ต้องการออกต้นฉบับซ้ำ?`, { ok: 'พิมพ์ต้นฉบับซ้ำ' }))) return;
       }
       const btn = $('#bpGo', b);
       btn.disabled = true;
@@ -1041,8 +1074,8 @@
     $('#pf').onchange = (e) => adminPayments(e.target.value).catch(fail);
     $$('[data-ok]').forEach((b) => { b.onclick = () => busy(b, async () => { await api('apiReviewPayment', b.dataset.ok, true, ''); toast('อนุมัติแล้ว'); await adminPayments(status); loadAdmin(); }); });
     $$('[data-no]').forEach((b) => {
-      b.onclick = () => {
-        const note = prompt('เหตุผลที่ไม่ผ่าน (ผู้เช่าจะเห็น)', 'ยอดเงินไม่ตรง');
+      b.onclick = async () => {
+        const note = await askText('เหตุผลที่ไม่ผ่าน (ผู้เช่าจะเห็น)', 'ยอดเงินไม่ตรง');
         if (note === null) return;
         busy(b, async () => { await api('apiReviewPayment', b.dataset.no, false, note); toast('บันทึกแล้ว'); await adminPayments(status); loadAdmin(); });
       };
@@ -1184,8 +1217,8 @@
     $('#addOut').onclick = () => entryForm({ type: 'expense', date: month === thisMonth() ? today() : month + '-01' }, d.categories, month);
     $$('[data-editent]').forEach((b) => { b.onclick = () => entryForm(d.entries.find((x) => x.id === b.dataset.editent), d.categories, month); });
     $$('[data-delent]').forEach((b) => {
-      b.onclick = () => {
-        if (!confirm('ลบรายการนี้?')) return;
+      b.onclick = async () => {
+        if (!(await ask('ลบรายการนี้?', { ok: 'ลบ', danger: true }))) return;
         busy(b, async () => { await api('apiDeleteEntry', b.dataset.delent); toast('ลบแล้ว'); adminAccounts(month); });
       };
     });
