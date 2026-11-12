@@ -207,6 +207,9 @@
   @media (min-width: 900px) { .min input { max-width: 130px; } }
   .muse { display: block; font-size: 12px; line-height: 1.35; color: var(--accent); margin-top: 4px; min-height: 16px; }
   .mcell.bad input { border-color: var(--bad); }
+  .mchg { all: unset; cursor: pointer; font-size: 12px; color: var(--muted); text-decoration: underline; text-underline-offset: 3px; margin-top: 2px; }
+  .mchg:hover, .mchg:focus-visible { color: var(--accent); }
+  .mchg.on { color: var(--warn); text-decoration: none; font-weight: 700; }
   .mcell.bad .muse { color: var(--bad); }
   .mcharges { grid-area: charges; min-width: 0; }
   .mcharges .charges { min-width: 0; }

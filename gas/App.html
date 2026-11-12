@@ -655,8 +655,8 @@
               <div><label>ค่าเช่า/เดือน</label><input name="rent" type="number" value="${esc(r.rent)}"></div>
               <div><label>เงินประกัน</label><input name="deposit" type="number" value="${esc(r.deposit)}"></div>
               <div></div>
-              <div><label>มิเตอร์น้ำตอนเข้า</label><input name="water" type="number" step="any" required></div>
-              <div><label>มิเตอร์ไฟตอนเข้า</label><input name="electric" type="number" step="any" required></div>
+              <div><label>มิเตอร์น้ำตอนเข้า</label><input name="water" type="text" inputmode="numeric" pattern="[0-9]+([.][0-9]+)?" placeholder="เช่น 0012" required></div>
+              <div><label>มิเตอร์ไฟตอนเข้า</label><input name="electric" type="text" inputmode="numeric" pattern="[0-9]+([.][0-9]+)?" placeholder="เช่น 01250" required></div>
             </div>
             <p><button type="submit">บันทึกย้ายเข้า</button></p>
           </form>
@@ -831,24 +831,28 @@
         </div>
         ${rows.map((r) => {
           const st = r.invoiceStatus && r.invoiceStatus !== 'cancelled' ? r.invoiceStatus : '';
-          const meterCell = (kind, label, icon, prev, val) => `
-            <div class="mcell" data-kind="${kind}" data-prev="${esc(prev)}">
+          const meterCell = (kind, label, icon, prev, prevText, val) => {
+            const ch = (r.change || {})[kind];
+            return `
+            <div class="mcell" data-kind="${kind}" data-prev="${esc(prev)}" data-prevtext="${esc(prevText)}" data-change="${esc(ch ? JSON.stringify(ch) : '')}">
               <span class="mlab">${ic(icon)} ${label}</span>
               <div class="min">
-                <span class="mprev" title="เลขเดือนก่อน">${fmt(prev)}</span>
+                <span class="mprev" title="เลขเดือนก่อน">${esc(prevText)}</span>
                 <span class="marrow">→</span>
-                <input name="${kind}" type="number" step="any" inputmode="decimal" value="${esc(val)}" placeholder="เลขล่าสุด" aria-label="${label} ห้อง ${esc(r.roomId)}">
+                <input name="${kind}" type="text" inputmode="numeric" autocomplete="off" value="${esc(val)}" placeholder="เลขล่าสุด" aria-label="${label} ห้อง ${esc(r.roomId)}">
               </div>
               <span class="muse"></span>
+              <button type="button" class="mchg${ch ? ' on' : ''}" data-mchange="${esc(r.roomId)}" data-kind="${kind}">${ch ? (ch.type === 'replace' ? 'เปลี่ยนมิเตอร์แล้ว' : 'มิเตอร์วนรอบ') + ' · แก้ไข' : 'เปลี่ยนมิเตอร์ / วนรอบ'}</button>
             </div>`;
+          };
           return `
           <div class="mrow card" data-room="${esc(r.roomId)}">
             <div class="mroom">
               <span class="mno">${esc(r.roomId)}</span>
               <span class="mname" title="${esc(r.tenantName)}">${esc(r.tenantName)}</span>
             </div>
-            ${meterCell('water', 'น้ำ', 'drop', r.prevWater, r.water)}
-            ${meterCell('electric', 'ไฟ', 'bolt', r.prevElectric, r.electric)}
+            ${meterCell('water', 'น้ำ', 'drop', r.prevWater, r.prevWaterText, r.waterText)}
+            ${meterCell('electric', 'ไฟ', 'bolt', r.prevElectric, r.prevElectricText, r.electricText)}
             <div class="mcharges"><span class="mlab">รายการเพิ่ม</span>${chargeCell(r.roomId)}</div>
             <div class="mbill">
               ${st ? pill(st) : '<span class="muted" style="font-size:13px">ยังไม่ออกบิล</span>'}
@@ -897,9 +901,16 @@
       const out = $('.muse', cell);
       const prev = Number(cell.dataset.prev) || 0;
       cell.classList.remove('bad');
-      if (inp.value === '') { out.textContent = 'ยังไม่กรอก'; return; }
-      const u = Number(inp.value) - prev;
-      if (u < 0) { cell.classList.add('bad'); out.textContent = 'น้อยกว่าเลขเดือนก่อน'; return; }
+      const v = inp.value.trim();
+      if (v === '') { out.textContent = 'ยังไม่กรอก'; return; }
+      if (!/^\d+(\.\d+)?$/.test(v)) { cell.classList.add('bad'); out.textContent = 'กรอกเฉพาะตัวเลข'; return; }
+      const ch = cell.dataset.change ? JSON.parse(cell.dataset.change) : null;
+      let u;
+      if (ch && ch.type === 'replace') u = (Number(ch.oldFinal) - prev) + (Number(v) - Number(ch.newStart));
+      else if (ch && ch.type === 'rollover') u = Math.pow(10, Number(ch.digits) || cell.dataset.prevtext.split('.')[0].length) - prev + Number(v);
+      else u = Number(v) - prev;
+      u = Math.round(u * 100) / 100;
+      if (u < 0) { cell.classList.add('bad'); out.textContent = ch ? 'เลขไม่สัมพันธ์กับข้อมูลการเปลี่ยนมิเตอร์' : 'น้อยกว่าเลขเดือนก่อน ถ้าเปลี่ยนมิเตอร์ กดปุ่มด้านล่าง'; return; }
       const water = cell.dataset.kind === 'water';
       const rate = Number(water ? st.waterRate : st.electricRate) || 0;
       const min = Number(water ? st.waterMinCharge : st.electricMinCharge) || 0;
@@ -907,6 +918,13 @@
       out.textContent = `ใช้ ${fmt(u)} หน่วย` + (rate ? ` · ${fmt(amt)} บาท` : '');
     };
     $$('#meter .mcell').forEach((cell) => { usage(cell); $('input', cell).addEventListener('input', () => usage(cell)); });
+    $$('[data-mchange]').forEach((b) => {
+      b.onclick = () => {
+        const cell = b.closest('.mcell');
+        meterChangeForm(month, b.dataset.mchange, b.dataset.kind, cell.dataset.prevtext,
+          cell.dataset.change ? JSON.parse(cell.dataset.change) : null, collect());
+      };
+    });
     // ออกใบแจ้งหนี้ทีละห้อง (บันทึกเลขมิเตอร์ของแถวนั้นก่อน)
     $$('[data-genroom]').forEach((b) => {
       b.onclick = async () => {
@@ -956,6 +974,69 @@
         busy(b, async () => { await api('apiCancelInvoice', inv.id, reason); toast('ยกเลิกแล้ว กดออกใบแจ้งหนี้ใหม่ได้'); adminBilling(month); });
       };
     });
+  }
+
+  // เปลี่ยนมิเตอร์ (ตัวเก่าเสีย) หรือมิเตอร์วนรอบกลับไปเริ่ม 0
+  function meterChangeForm(month, roomId, kind, prevText, cur, rows) {
+    const label = kind === 'water' ? 'น้ำ' : 'ไฟ';
+    const digits = String(prevText || '').split('.')[0].length || 4;
+    const t = (cur && cur.type) || 'replace';
+    const b = openModal(`มิเตอร์${label} ห้อง ${roomId} · ${thMonth(month)}`, `
+      <form id="mcForm">
+        <p class="muted" style="margin-top:0">เลขเดือนก่อน <strong style="color:var(--text)">${esc(prevText)}</strong></p>
+        <div class="seg" style="margin-top:0">
+          <button type="button" data-t="replace" class="${t === 'replace' ? 'on' : ''}">เปลี่ยนมิเตอร์ใหม่</button>
+          <button type="button" data-t="rollover" class="${t === 'rollover' ? 'on' : ''}">มิเตอร์วนรอบ</button>
+        </div>
+        <div data-p="replace">
+          <p class="muted" style="font-size:14px">ใช้เมื่อเปลี่ยนมิเตอร์ตัวที่เสีย หน่วยที่ใช้ = (เลขสุดท้ายของตัวเก่า − เลขเดือนก่อน) + (เลขล่าสุด − เลขเริ่มของตัวใหม่)</p>
+          <div class="grid2">
+            <div><label>วันที่เปลี่ยน</label><input name="date" type="date" value="${esc((cur && cur.date) || new Date().toISOString().slice(0, 10))}"></div>
+            <div></div>
+            <div><label>เลขสุดท้ายของตัวเก่า</label><input name="oldFinal" type="text" inputmode="numeric" value="${esc((cur && cur.oldFinalText) || '')}" placeholder="เลขที่อ่านได้ก่อนถอด"></div>
+            <div><label>เลขเริ่มของตัวใหม่</label><input name="newStart" type="text" inputmode="numeric" value="${esc((cur && cur.newStartText) || '0'.repeat(digits))}"></div>
+          </div>
+        </div>
+        <div data-p="rollover">
+          <p class="muted" style="font-size:14px">ใช้เมื่อมิเตอร์ตัวเดิมหมุนครบหลักแล้ววนกลับไปเริ่มที่ 0 เช่น 9990 → 0015 หน่วยที่ใช้ = (10 ยกกำลังจำนวนหลัก − เลขเดือนก่อน) + เลขล่าสุด</p>
+          <label>จำนวนหลักของมิเตอร์ (ไม่รวมทศนิยม)</label>
+          <input name="digits" type="number" min="1" max="9" value="${esc((cur && cur.digits) || digits)}">
+        </div>
+        <label>หมายเหตุ (ไม่บังคับ)</label><input name="note" value="${esc((cur && cur.note) || '')}" placeholder="เช่น มิเตอร์เดิมไม่หมุน">
+        <p class="row"><button type="submit">บันทึก</button>
+          ${cur ? '<button type="button" class="ghost" id="mcDel" style="color:var(--bad);border-color:var(--bad)">ลบรายการนี้</button>' : ''}</p>
+      </form>`);
+    let type = t;
+    const show = () => {
+      $$('[data-t]', b).forEach((x) => x.classList.toggle('on', x.dataset.t === type));
+      $$('[data-p]', b).forEach((x) => { x.style.display = x.dataset.p === type ? '' : 'none'; });
+    };
+    $$('[data-t]', b).forEach((x) => { x.onclick = () => { type = x.dataset.t; show(); }; });
+    show();
+    const after = async () => {
+      // เก็บเลขที่กรอกค้างไว้ก่อนโหลดหน้าใหม่
+      const filled = rows.filter((x) => x.water !== '' && x.electric !== '');
+      if (filled.length) await api('apiSaveReadings', month, filled);
+      closeModal();
+      await adminBilling(month);
+    };
+    $('#mcForm', b).onsubmit = (e) => {
+      e.preventDefault();
+      const f = formData(e.target);
+      const data = type === 'replace'
+        ? { type, date: f.date, oldFinal: f.oldFinal, newStart: f.newStart, note: f.note }
+        : { type, digits: f.digits, note: f.note };
+      busy($('button[type=submit]', e.target), async () => {
+        await api('apiSaveMeterChange', month, roomId, kind, data);
+        toast('บันทึกการเปลี่ยนมิเตอร์แล้ว');
+        await after();
+      });
+    };
+    if ($('#mcDel', b)) $('#mcDel', b).onclick = async (e) => {
+      const btn = e.target;
+      if (!(await ask('ลบข้อมูลการเปลี่ยนมิเตอร์นี้?', { ok: 'ลบ', danger: true }))) return;
+      busy(btn, async () => { await api('apiSaveMeterChange', month, roomId, kind, null); toast('ลบแล้ว'); await after(); });
+    };
   }
 
   // พิมพ์ใบแจ้งหนี้/ใบเสร็จหลายห้องในครั้งเดียว (1 ใบต่อ A4 เรียงตามเลขห้อง)

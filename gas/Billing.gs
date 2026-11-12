@@ -42,13 +42,21 @@ function monthSheet_(month) {
     const p = readings[room.id + '_' + prev];
     const c = readings[room.id + '_' + month];
     const movedInThisMonth = t.moveIn && t.moveIn.slice(0, 7) >= month;
+    const usePrev = p && p.water != null && !movedInThisMonth;
+    const has = c && c.water != null;
     return {
       roomId: room.id,
       tenantName: t.tenantName || '',
-      prevWater: p && !movedInThisMonth ? p.water : (t.startWater || 0),
-      prevElectric: p && !movedInThisMonth ? p.electric : (t.startElectric || 0),
-      water: c ? c.water : '',
-      electric: c ? c.electric : '',
+      prevWater: usePrev ? p.water : (t.startWater || 0),
+      prevElectric: usePrev ? p.electric : (t.startElectric || 0),
+      // เลขตามที่จด (เก็บเลข 0 ข้างหน้าไว้)
+      prevWaterText: usePrev ? (p.waterText || String(p.water)) : (t.startWaterText || String(t.startWater || 0)),
+      prevElectricText: usePrev ? (p.electricText || String(p.electric)) : (t.startElectricText || String(t.startElectric || 0)),
+      water: has ? c.water : '',
+      electric: has ? c.electric : '',
+      waterText: has ? (c.waterText || String(c.water)) : '',
+      electricText: has ? (c.electricText || String(c.electric)) : '',
+      change: (c && c.change) || {},
       invoiceStatus: invoices[room.id] ? invoices[room.id].status : '',
     };
   });
@@ -58,14 +66,45 @@ function monthSheet_(month) {
   return { rows: rows, rooms: roomsById, tenancies: tenancies, invoices: invoices, charges: charges };
 }
 
-/** rows: [{roomId, water, electric}] */
+/** '0012' -> {n: 12, t: '0012'} ; ว่าง -> null */
+function meterVal_(raw) {
+  const t = String(raw == null ? '' : raw).trim();
+  if (t === '') return null;
+  if (!/^\d+(\.\d+)?$/.test(t)) throw new Error('เลขมิเตอร์ไม่ถูกต้อง: ' + t);
+  return { n: Number(t), t: t };
+}
+
+/**
+ * หน่วยที่ใช้
+ * ch.type 'replace'  เปลี่ยนมิเตอร์: (เลขสุดท้ายตัวเก่า - เลขก่อน) + (เลขล่าสุด - เลขเริ่มตัวใหม่)
+ * ch.type 'rollover' มิเตอร์วนรอบ: (10^จำนวนหลัก - เลขก่อน) + เลขล่าสุด
+ */
+function meterUnits_(prevN, prevT, curN, ch) {
+  if (ch && ch.type === 'replace') return round2_((Number(ch.oldFinal) - prevN) + (curN - Number(ch.newStart)));
+  if (ch && ch.type === 'rollover') {
+    const d = Number(ch.digits) || String(prevT || prevN).split('.')[0].length;
+    return round2_(Math.pow(10, d) - prevN + curN);
+  }
+  return round2_(curN - prevN);
+}
+
+/** rows: [{roomId, water, electric}] เก็บทั้งตัวเลขและข้อความตามที่จด */
 function apiSaveReadings(token, month, rows) {
   const me = requireSession_(token, 'admin');
-  const docs = {};
+  const list = [];
   rows.forEach(function (r) {
-    if (r.water === '' || r.electric === '' || r.water == null || r.electric == null) return;
-    docs[r.roomId + '_' + month] = {
-      roomId: r.roomId, month: month, water: Number(r.water), electric: Number(r.electric),
+    const w = meterVal_(r.water), e = meterVal_(r.electric);
+    if (!w || !e) return;
+    list.push({ id: r.roomId + '_' + month, roomId: r.roomId, w: w, e: e });
+  });
+  if (!list.length) return true;
+  // คงข้อมูลการเปลี่ยนมิเตอร์ที่บันทึกไว้แล้ว
+  const old = fsMulti_(list.map(function (x) { return { get: [COL.READINGS, x.id] }; }));
+  const docs = {};
+  list.forEach(function (x, i) {
+    docs[x.id] = {
+      roomId: x.roomId, month: month, water: x.w.n, electric: x.e.n, waterText: x.w.t, electricText: x.e.t,
+      change: (old[i] && old[i].change) || {},
     };
   });
   fsSetMany_(COL.READINGS, docs);
@@ -75,8 +114,22 @@ function apiSaveReadings(token, month, rows) {
 
 /** คำนวณรายการในบิล (ใช้ได้ทั้งพรีวิวและออกจริง) */
 function calcInvoice_(settings, room, tenancy, prevR, curR, month, extra) {
-  const wUnits = Math.max(0, curR.water - prevR.water);
-  const eUnits = Math.max(0, curR.electric - prevR.electric);
+  const ch = curR.change || {};
+  const wUnits = meterUnits_(prevR.water, prevR.waterText, curR.water, ch.water);
+  const eUnits = meterUnits_(prevR.electric, prevR.electricText, curR.electric, ch.electric);
+  const hint = ' ถ้าเปลี่ยนมิเตอร์หรือมิเตอร์วนรอบ ให้กด "เปลี่ยนมิเตอร์" ที่ช่องนั้นก่อน';
+  if (wUnits < 0) throw new Error('เลขมิเตอร์น้ำน้อยกว่าเดือนก่อน' + hint);
+  if (eUnits < 0) throw new Error('เลขมิเตอร์ไฟน้อยกว่าเดือนก่อน' + hint);
+  const line = function (kind, units, rate) {
+    const c = ch[kind];
+    const p = prevR[kind + 'Text'] || prevR[kind], n = curR[kind + 'Text'] || curR[kind];
+    if (c && c.type === 'replace') {
+      return 'เปลี่ยนมิเตอร์' + (c.date ? ' ' + shortDate_(c.date) : '') + ': ตัวเก่า ' + p + ' → ' + (c.oldFinalText || c.oldFinal) +
+        ' + ตัวใหม่ ' + (c.newStartText || c.newStart) + ' → ' + n + ' = ' + units + ' หน่วย × ' + rate;
+    }
+    if (c && c.type === 'rollover') return p + ' → วนรอบ → ' + n + ' = ' + units + ' หน่วย × ' + rate;
+    return p + ' → ' + n + ' = ' + units + ' หน่วย × ' + rate;
+  };
   const wAmt = Math.max(wUnits * settings.waterRate, settings.waterMinCharge || 0);
   const eAmt = Math.max(eUnits * settings.electricRate, settings.electricMinCharge || 0);
   const rent = Number(tenancy.rent || room.rent);
@@ -86,9 +139,9 @@ function calcInvoice_(settings, room, tenancy, prevR, curR, month, extra) {
   const items = [
     { name: 'ค่าห้อง' + period, qty: 1, price: rent, amount: rent, detail: '' },
     { name: 'ค่าไฟ' + period, qty: eUnits, price: settings.electricRate, amount: eAmt,
-      detail: prevR.electric + ' → ' + curR.electric + ' = ' + eUnits + ' หน่วย × ' + settings.electricRate },
+      detail: line('electric', eUnits, settings.electricRate) },
     { name: 'ค่าน้ำ' + period, qty: wUnits, price: settings.waterRate, amount: wAmt,
-      detail: prevR.water + ' → ' + curR.water + ' = ' + wUnits + ' หน่วย × ' + settings.waterRate },
+      detail: line('water', wUnits, settings.waterRate) },
   ];
   (settings.otherFees || []).forEach(function (f) {
     const a = Number(f.amount) || 0;
@@ -132,8 +185,9 @@ function apiGenerateInvoices(token, month, roomIds) {
       const tenancy = ms.tenancies[room.currentTenancyId];
       if (!tenancy) return { roomId: row.roomId, ok: false, error: 'ไม่พบข้อมูลผู้เช่า' };
       const calc = calcInvoice_(settings, room, tenancy,
-        { water: row.prevWater, electric: row.prevElectric },
-        { water: row.water, electric: row.electric }, month, ms.charges[row.roomId]);
+        { water: row.prevWater, electric: row.prevElectric, waterText: row.prevWaterText, electricText: row.prevElectricText },
+        { water: row.water, electric: row.electric, waterText: row.waterText, electricText: row.electricText, change: row.change },
+        month, ms.charges[row.roomId]);
       const id = row.roomId + '_' + month;
       let old = ms.invoices[row.roomId];
       if (old && old.status === 'cancelled') old = null; // ใบที่ยกเลิกแล้ว ออกใบใหม่เลขใหม่
@@ -160,6 +214,43 @@ function apiGenerateInvoices(token, month, roomIds) {
   const ok = results.filter(function (x) { return x.ok; });
   audit_(me, 'ออกใบแจ้งหนี้', 'เดือน ' + month, ok.length + ' ห้อง: ' + ok.map(function (x) { return x.roomId; }).join(', '));
   return results;
+}
+
+/**
+ * บันทึก/ลบ การเปลี่ยนมิเตอร์ของห้องในเดือนนั้น
+ * kind: 'water' | 'electric'
+ * data: {type:'replace', date, oldFinal, newStart, note} | {type:'rollover', digits, note} | null (ลบ)
+ */
+function apiSaveMeterChange(token, month, roomId, kind, data) {
+  const me = requireSession_(token, 'admin');
+  if (['water', 'electric'].indexOf(kind) < 0) throw new Error('ประเภทมิเตอร์ไม่ถูกต้อง');
+  const id = roomId + '_' + month;
+  const doc = fsGet_(COL.READINGS, id) || { roomId: roomId, month: month };
+  const change = Object.assign({}, doc.change || {});
+  const label = kind === 'water' ? 'น้ำ' : 'ไฟ';
+  let detail;
+  if (!data) {
+    delete change[kind];
+    detail = 'ลบการเปลี่ยนมิเตอร์' + label;
+  } else if (data.type === 'replace') {
+    const o = meterVal_(data.oldFinal), s = meterVal_(data.newStart);
+    if (!o || !s) throw new Error('กรุณากรอกเลขสุดท้ายของตัวเก่าและเลขเริ่มของตัวใหม่');
+    change[kind] = {
+      type: 'replace', date: data.date || today_(), oldFinal: o.n, oldFinalText: o.t, newStart: s.n, newStartText: s.t,
+      note: data.note || '', by: me.email || me.name || '',
+    };
+    detail = 'เปลี่ยนมิเตอร์' + label + ' ตัวเก่าจบที่ ' + o.t + ' ตัวใหม่เริ่ม ' + s.t;
+  } else if (data.type === 'rollover') {
+    const d = Number(data.digits);
+    if (!(d >= 1 && d <= 9)) throw new Error('จำนวนหลักไม่ถูกต้อง');
+    change[kind] = { type: 'rollover', digits: d, note: data.note || '', by: me.email || me.name || '' };
+    detail = 'มิเตอร์' + label + 'วนรอบ (' + d + ' หลัก)';
+  } else {
+    throw new Error('ข้อมูลไม่ถูกต้อง');
+  }
+  fsUpdate_(COL.READINGS, id, { roomId: roomId, month: month, change: change });
+  audit_(me, 'เปลี่ยนมิเตอร์', 'ห้อง ' + roomId + ' เดือน ' + month, detail + (data && data.note ? ' · ' + data.note : ''));
+  return change;
 }
 
 /** '2026-10-31' -> '25691031' (พ.ศ. เดือน วันที่) */
