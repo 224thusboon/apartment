@@ -188,7 +188,45 @@
     border-radius: 999px; background: var(--accent-soft); white-space: nowrap; }
   .chip-charge .x { border: 0; background: none; color: var(--muted); padding: 0 6px; font-size: 16px; line-height: 1; box-shadow: none; }
   .chip-charge .x:hover { color: var(--bad); box-shadow: none; }
-  #meter td input { min-width: 80px; max-width: 120px; }
+  /* ตารางจดมิเตอร์: แถวแบบกริด คอมเป็นแถวเดียว มือถือเป็นการ์ด */
+  .meter { display: grid; gap: 10px; margin-bottom: 14px; }
+  .mrow { display: grid; gap: 12px 14px; align-items: center; margin: 0; padding: 14px 16px;
+    grid-template-columns: 1fr auto; grid-template-areas: "room bill" "water electric" "charges charges"; }
+  .mrow.mhead { display: none; }
+  .mroom { grid-area: room; display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+  .mno { font-family: var(--head); font-size: 20px; font-weight: 700; }
+  .mname { color: var(--muted); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .mcell[data-kind=water] { grid-area: water; } .mcell[data-kind=electric] { grid-area: electric; }
+  .mcell { min-width: 0; }
+  .mlab { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+  .mlab svg.i { width: 15px; height: 15px; }
+  .min { display: flex; align-items: center; gap: 6px; }
+  .mprev { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; white-space: nowrap; }
+  .marrow { color: var(--muted); font-size: 13px; }
+  .min input { padding: 8px 10px; min-width: 0; width: 100%; max-width: 130px; font-variant-numeric: tabular-nums; }
+  .muse { display: block; font-size: 12px; color: var(--accent); margin-top: 4px; min-height: 16px; white-space: nowrap; }
+  .mcell.bad input { border-color: var(--bad); }
+  .mcell.bad .muse { color: var(--bad); }
+  .mcharges { grid-area: charges; min-width: 0; }
+  .mcharges .charges { min-width: 0; }
+  .mbill { grid-area: bill; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .mbill button { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
+  .mbill button svg.i { width: 16px; height: 16px; }
+  @media (min-width: 900px) {
+    .meter { gap: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); overflow: hidden; }
+    .mrow { grid-template-columns: minmax(150px, 1.1fr) minmax(170px, 1fr) minmax(170px, 1fr) minmax(170px, 1.3fr) 150px;
+      grid-template-areas: "room water electric charges bill"; border: 0; border-radius: 0; box-shadow: none;
+      border-bottom: 1px solid var(--line); background: transparent; }
+    .mrow:last-child { border-bottom: 0; }
+    .mrow.mhead { display: grid; padding: 10px 16px; background: var(--bg); font-size: 13px; font-weight: 700; color: var(--muted); }
+    .mrow.mhead span { display: flex; align-items: center; gap: 4px; }
+    .mrow.mhead span:nth-child(1) { grid-area: room; } .mrow.mhead span:nth-child(2) { grid-area: water; }
+    .mrow.mhead span:nth-child(3) { grid-area: electric; } .mrow.mhead span:nth-child(4) { grid-area: charges; }
+    .mrow.mhead span:nth-child(5) { grid-area: bill; justify-content: flex-end; }
+    .mrow.mhead svg.i { width: 15px; height: 15px; }
+    .mrow .mlab { display: none; }
+    .mroom { flex-direction: column; align-items: flex-start; gap: 0; }
+  }
   .money-in { color: var(--ok); }
   .money-out { color: var(--bad); }
   .acc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }

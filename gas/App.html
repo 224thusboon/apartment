@@ -825,21 +825,38 @@
     $('#view').innerHTML = `
       ${sec(`จดมิเตอร์ ${thMonth(month)}`, `<input type="month" id="mon" value="${month}" style="width:auto">`)}
       <p class="muted" style="font-size:14px;margin-top:-6px">กรอกเลขมิเตอร์สิ้นเดือน หน่วยที่ใช้คิดจากเลขเดือนก่อน · รายการเพิ่ม (เช่น ค่าซ่อม) ของแต่ละห้องจะรวมเข้าบิลห้องนั้นเดือนนี้</p>
-      <div class="card scroll-x">
-        ${rows.length ? `<table id="meter">
-          <thead><tr><th>ห้อง</th><th class="num">${ic('drop')} น้ำ (ก่อน)</th><th>น้ำ (ล่าสุด)</th><th class="num">${ic('bolt')} ไฟ (ก่อน)</th><th>ไฟ (ล่าสุด)</th><th>รายการเพิ่ม</th><th>บิล</th></tr></thead>
-          <tbody>${rows.map((r) => `
-            <tr data-room="${esc(r.roomId)}">
-              <td><strong>${esc(r.roomId)}</strong><div class="muted" style="font-size:13px">${esc(r.tenantName)}</div></td>
-              <td class="num">${fmt(r.prevWater)}</td>
-              <td><input name="water" type="number" step="any" inputmode="decimal" value="${esc(r.water)}"></td>
-              <td class="num">${fmt(r.prevElectric)}</td>
-              <td><input name="electric" type="number" step="any" inputmode="decimal" value="${esc(r.electric)}"></td>
-              <td>${chargeCell(r.roomId)}</td>
-              <td><div class="row" style="flex-wrap:nowrap">${r.invoiceStatus && r.invoiceStatus !== 'cancelled' ? pill(r.invoiceStatus) : ''}
-                ${r.invoiceStatus === 'paid' ? '' : `<button type="button" class="small ghost" data-genroom="${esc(r.roomId)}">${ic('bill')} ${r.invoiceStatus && r.invoiceStatus !== 'cancelled' ? 'ออกใหม่' : 'ออกบิล'}</button>`}</div></td>
-            </tr>`).join('')}</tbody></table>` : '<p class="muted">ยังไม่มีห้องที่มีผู้เช่า</p>'}
-      </div>
+      ${rows.length ? `<div class="meter" id="meter">
+        <div class="mrow mhead" aria-hidden="true">
+          <span>ห้อง</span><span>${ic('drop')} มิเตอร์น้ำ</span><span>${ic('bolt')} มิเตอร์ไฟ</span><span>รายการเพิ่ม</span><span>บิลเดือนนี้</span>
+        </div>
+        ${rows.map((r) => {
+          const st = r.invoiceStatus && r.invoiceStatus !== 'cancelled' ? r.invoiceStatus : '';
+          const meterCell = (kind, label, icon, prev, val) => `
+            <div class="mcell" data-kind="${kind}" data-prev="${esc(prev)}">
+              <span class="mlab">${ic(icon)} ${label}</span>
+              <div class="min">
+                <span class="mprev" title="เลขเดือนก่อน">${fmt(prev)}</span>
+                <span class="marrow">→</span>
+                <input name="${kind}" type="number" step="any" inputmode="decimal" value="${esc(val)}" placeholder="เลขล่าสุด" aria-label="${label} ห้อง ${esc(r.roomId)}">
+              </div>
+              <span class="muse"></span>
+            </div>`;
+          return `
+          <div class="mrow card" data-room="${esc(r.roomId)}">
+            <div class="mroom">
+              <span class="mno">${esc(r.roomId)}</span>
+              <span class="mname" title="${esc(r.tenantName)}">${esc(r.tenantName)}</span>
+            </div>
+            ${meterCell('water', 'น้ำ', 'drop', r.prevWater, r.water)}
+            ${meterCell('electric', 'ไฟ', 'bolt', r.prevElectric, r.electric)}
+            <div class="mcharges"><span class="mlab">รายการเพิ่ม</span>${chargeCell(r.roomId)}</div>
+            <div class="mbill">
+              ${st ? pill(st) : '<span class="muted" style="font-size:13px">ยังไม่ออกบิล</span>'}
+              ${st === 'paid' ? '' : `<button type="button" class="small${st ? ' ghost' : ''}" data-genroom="${esc(r.roomId)}" data-again="${st ? 1 : ''}">${ic('bill')} ${st ? 'ออกใหม่' : 'ออกบิล'}</button>`}
+            </div>
+          </div>`;
+        }).join('')}
+      </div>` : '<div class="card muted">ยังไม่มีห้องที่มีผู้เช่า</div>'}
       <div class="row">
         <button type="button" class="ghost" id="saveMeter">บันทึกเลขมิเตอร์</button>
         <button type="button" id="genInv">${ic('bill')} บันทึก + ออกใบแจ้งหนี้</button>
@@ -870,16 +887,33 @@
 
     $('#mon').onchange = (e) => e.target.value && go_billing(e.target.value);
     if ($('#batchPrint')) $('#batchPrint').onclick = () => batchPrint(month, active);
-    const collect = () => $$('#meter tbody tr').map((tr) => ({
+    const collect = () => $$('#meter [data-room]').map((tr) => ({
       roomId: tr.dataset.room, water: $('[name=water]', tr).value, electric: $('[name=electric]', tr).value,
     }));
+    // แสดงหน่วยที่ใช้และค่าโดยประมาณทันทีที่กรอก
+    const st = (state.admin && state.admin.settings) || {};
+    const usage = (cell) => {
+      const inp = $('input', cell);
+      const out = $('.muse', cell);
+      const prev = Number(cell.dataset.prev) || 0;
+      cell.classList.remove('bad');
+      if (inp.value === '') { out.textContent = 'ยังไม่กรอก'; return; }
+      const u = Number(inp.value) - prev;
+      if (u < 0) { cell.classList.add('bad'); out.textContent = 'น้อยกว่าเลขเดือนก่อน'; return; }
+      const water = cell.dataset.kind === 'water';
+      const rate = Number(water ? st.waterRate : st.electricRate) || 0;
+      const min = Number(water ? st.waterMinCharge : st.electricMinCharge) || 0;
+      const amt = Math.max(u * rate, min);
+      out.textContent = `ใช้ ${fmt(u)} หน่วย` + (rate ? ` · ${fmt(amt)} บาท` : '');
+    };
+    $$('#meter .mcell').forEach((cell) => { usage(cell); $('input', cell).addEventListener('input', () => usage(cell)); });
     // ออกใบแจ้งหนี้ทีละห้อง (บันทึกเลขมิเตอร์ของแถวนั้นก่อน)
     $$('[data-genroom]').forEach((b) => {
       b.onclick = async () => {
         const roomId = b.dataset.genroom;
         const row = collect().find((x) => x.roomId === roomId);
         if (row.water === '' || row.electric === '') { toast('กรอกเลขมิเตอร์น้ำและไฟของห้อง ' + roomId + ' ก่อน', true); return; }
-        const again = b.textContent.indexOf('ออกใหม่') >= 0;
+        const again = !!b.dataset.again;
         if (!(await ask(again ? `ออกใบแจ้งหนี้ห้อง ${roomId} ใหม่? ใบเดิมจะถูกแทนที่ (เลขที่เดิม)` : `ออกใบแจ้งหนี้ห้อง ${roomId}?`, { ok: 'ออกใบแจ้งหนี้' }))) return;
         busy(b, async () => {
           await api('apiSaveReadings', month, [row]);
