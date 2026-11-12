@@ -235,7 +235,7 @@ function apiSaveSettings(token, s) {
   const me = requireSession_(token, 'admin');
   const allowed = ['dormName', 'dormAddress', 'ownerName', 'phone', 'bankInfo', 'primaryColor',
     'waterRate', 'waterMinCharge', 'electricRate', 'electricMinCharge', 'dueDay', 'otherFees',
-    'invoiceNotes', 'invoiceFooter'];
+    'invoiceNotes', 'invoiceFooter', 'invoiceStyle'];
   const nums = ['waterRate', 'waterMinCharge', 'electricRate', 'electricMinCharge', 'dueDay'];
   const upd = {};
   allowed.forEach(function (k) {

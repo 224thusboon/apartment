@@ -47,6 +47,9 @@ const DEFAULT_SETTINGS = {
   invoiceSeq: 0,         // เลขที่ใบแจ้งหนี้ล่าสุด
   invoiceTemplateId: '', // Google Sheets template (setup() สร้างให้)
   receiptTemplateId: '', // Google Sheets template ใบเสร็จ (สร้างเองเมื่อออกใบแรก)
+  invoiceStyle: 'classic', // รูปแบบใบแจ้งหนี้/ใบเสร็จ: classic แบบเดิม | modern แบบใหม่
+  invoiceTemplateModernId: '',
+  receiptTemplateModernId: '',
   contractTemplateId: '',
   rootFolderId: '',
   slipFolderId: '',

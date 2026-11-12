@@ -301,6 +301,19 @@
   label.btn.disabled { opacity: .5; pointer-events: none; }
   .viewer img { max-width: 100%; border-radius: 12px; }
   .pdf-pages { display: grid; gap: 10px; }
+  .styles { display: grid; gap: 12px; margin-top: 12px; }
+  @media (min-width: 720px) { .styles { grid-template-columns: 1fr 1fr; } }
+  .style-opt { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 14px; border: 2px solid var(--line); border-radius: var(--radius);
+    cursor: pointer; color: var(--text); font-weight: 400; font-size: 14px; position: relative; transition: border-color .15s; }
+  .style-opt.on { border-color: var(--accent); background: var(--accent-soft); }
+  .style-opt input { position: absolute; top: 14px; right: 14px; width: auto; }
+  .style-opt strong { font-size: 16px; }
+  .sw { display: grid; gap: 4px; width: 84px; padding: 6px; border-radius: 8px; background: #fff; border: 1px solid #d7dee6; margin-bottom: 6px; }
+  .sw i { display: block; height: 8px; border-radius: 2px; background: #cfd8e2; }
+  .sw-classic i { background: none; border: 1px solid #333; border-radius: 0; height: 9px; }
+  .sw-modern i:nth-child(1) { background: #0f2747; height: 14px; }
+  .sw-modern i:nth-child(2) { background: #1a947e; }
+  .sw-modern i:nth-child(3) { background: #eef2f6; }
   .ask-wrap { position: fixed; inset: 0; z-index: 40; background: rgba(8, 19, 31, .6); display: grid; place-items: center; padding: 16px; }
   .ask { width: 100%; max-width: 420px; margin: 0; box-shadow: var(--shadow-lg); }
   .ask-msg { white-space: pre-line; margin: 0 0 10px; font-size: 16px; }

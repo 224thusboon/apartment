@@ -179,21 +179,49 @@ function fmtQty_(q) {
   return Number.isInteger(n) ? String(n) : n.toFixed(2);
 }
 
-function renderInvoicePdf_(settings, inv) {
-  if (!settings.invoiceTemplateId) throw new Error('ยังไม่มีแม่แบบใบแจ้งหนี้ (รัน rebuildInvoiceTemplate)');
+/** รูปแบบเอกสาร: 'classic' แบบเดิม (ตามใบ Excel ของหอ) | 'modern' แบบใหม่ */
+const DOC_STYLES = ['classic', 'modern'];
+function docStyle_(settings, style) {
+  style = style || settings.invoiceStyle || 'classic';
+  return DOC_STYLES.indexOf(style) >= 0 ? style : 'classic';
+}
+/** ช่องที่พิมพ์กรอบ ต้นฉบับ/สำเนา ของแต่ละรูปแบบ (แถว/คอลัมน์ เริ่ม 0) */
+const LABEL_CELL = { classic: { r: 3, c: 6 }, modern: { r: 3, c: 4 } };
+
+/** id แม่แบบของ (ใบแจ้งหนี้|ใบเสร็จ) x (รูปแบบ) สร้างให้อัตโนมัติถ้ายังไม่มี */
+function templateFor_(settings, kind, style) {
+  if (style === 'classic') {
+    if (kind === 'receipt') return ensureReceiptTemplate_(settings);
+    if (!settings.invoiceTemplateId) throw new Error('ยังไม่มีแม่แบบใบแจ้งหนี้ (รัน rebuildInvoiceTemplate)');
+    return settings.invoiceTemplateId;
+  }
+  const key = kind + 'TemplateModernId';
+  if (settings[key]) return settings[key];
+  const id = createModernTemplate_(DriveApp.getFolderById(settings.rootFolderId), kind);
+  const upd = {};
+  upd[key] = id;
+  fsUpdate_(COL.SETTINGS, 'main', upd);
+  clearSettingsCache_();
+  settings[key] = id;
+  return id;
+}
+
+function renderInvoicePdf_(settings, inv, style) {
+  style = docStyle_(settings, style);
   const map = docMap_(settings, inv, {
     docNo: inv.number, docDate: inv.issuedAt,
     notes: String(settings.invoiceNotes || '').split(/\r?\n/), footer: settings.invoiceFooter || '',
   });
-  return renderSheetPdf_(settings, settings.invoiceTemplateId, 'ใบแจ้งหนี้ ' + inv.roomId + ' ' + inv.month, inv.roomId, map);
+  return renderSheetPdf_(settings, templateFor_(settings, 'invoice', style), 'ใบแจ้งหนี้ ' + inv.roomId + ' ' + inv.month, inv.roomId, map);
 }
 
 /**
  * ใบเสร็จ: รายการเดียวกับใบแจ้งหนี้ อ้างอิงเลขที่ใบแจ้งหนี้
  * label: 'ต้นฉบับ' หรือ 'สำเนา' พิมพ์เป็นกรอบมุมขวาบน
  */
-function renderReceiptPdf_(settings, inv, rc, label) {
-  const tid = ensureReceiptTemplate_(settings);
+function renderReceiptPdf_(settings, inv, rc, label, style) {
+  style = docStyle_(settings, style);
+  const tid = templateFor_(settings, 'receipt', style);
   const map = docMap_(settings, inv, {
     docNo: rc.number, docDate: rc.paidAt, refNo: inv.number || '-',
     notes: [
@@ -204,7 +232,7 @@ function renderReceiptPdf_(settings, inv, rc, label) {
     footer: '',
   });
   return renderSheetPdf_(settings, tid, 'ใบเสร็จ ' + rc.number + ' ห้อง ' + inv.roomId + (label ? ' (' + label + ')' : ''),
-    inv.roomId, map, label);
+    inv.roomId, map, label, LABEL_CELL[style]);
 }
 
 function docMap_(settings, inv, o) {
@@ -217,6 +245,7 @@ function docMap_(settings, inv, o) {
     invoiceNo: o.docNo || '', invoiceDate: shortDate_(o.docDate), refNo: o.refNo || '',
     periodStart: shortDate_(inv.periodStart), periodEnd: shortDate_(inv.periodEnd),
     roomId: inv.roomId, total: money_(inv.total), footer: o.footer || '',
+    dormName: settings.dormName || '', dueDate: shortDate_(inv.dueDate), totalText: bahtText_(inv.total),
   };
   for (let i = 1; i <= INV_MAX_NOTES; i++) map['note' + i] = o.notes[i - 1] || '';
   for (let i = 1; i <= INV_MAX_ITEMS; i++) {
@@ -233,7 +262,7 @@ function docMap_(settings, inv, o) {
 }
 
 /** คัดลอกแม่แบบ Sheets -> แทนค่า -> export PDF -> ลบสำเนา */
-function renderSheetPdf_(settings, templateId, name, roomId, map, label) {
+function renderSheetPdf_(settings, templateId, name, roomId, map, label, labelCell) {
   const folder = DriveApp.getFolderById(settings.pdfFolderId);
   const copy = DriveApp.getFileById(templateId).makeCopy(name, folder);
   try {
@@ -243,7 +272,8 @@ function renderSheetPdf_(settings, templateId, name, roomId, map, label) {
     if (label) {
       // กรอบ ต้นฉบับ/สำเนา ที่ช่อง G4 (แถวว่างใต้ชื่อเอกสาร)
       const line = { style: 'SOLID_MEDIUM', color: { red: 0, green: 0, blue: 0 } };
-      const cell = { sheetId: 0, startRowIndex: 3, endRowIndex: 4, startColumnIndex: 6, endColumnIndex: 7 };
+      const lc = labelCell || LABEL_CELL.classic;
+      const cell = { sheetId: 0, startRowIndex: lc.r, endRowIndex: lc.r + 1, startColumnIndex: lc.c, endColumnIndex: lc.c + 1 };
       reqs.push({ updateCells: {
         range: cell, fields: 'userEnteredValue,userEnteredFormat',
         rows: [{ values: [{ userEnteredValue: { stringValue: label }, userEnteredFormat: {
@@ -265,3 +295,204 @@ function renderSheetPdf_(settings, templateId, name, roomId, map, label) {
     copy.setTrashed(true);
   }
 }
+
+// ---------- จำนวนเงินเป็นตัวหนังสือ ----------
+
+/** 3934.5 -> 'สามพันเก้าร้อยสามสิบสี่บาทห้าสิบสตางค์' */
+function bahtText_(amount) {
+  let n = Math.round((Number(amount) || 0) * 100) / 100;
+  if (n === 0) return 'ศูนย์บาทถ้วน';
+  const neg = n < 0;
+  n = Math.abs(n);
+  const baht = Math.floor(n);
+  const satang = Math.round((n - baht) * 100);
+  return (neg ? 'ลบ' : '') + (baht ? thaiNum_(baht) + 'บาท' : '') + (satang ? thaiNum_(satang) + 'สตางค์' : 'ถ้วน');
+}
+function thaiNum_(n, tail) {
+  if (n >= 1000000) {
+    const rest = n % 1000000;
+    return thaiNum_(Math.floor(n / 1000000)) + 'ล้าน' + (rest ? thaiNum_(rest, true) : '');
+  }
+  if (tail && n === 1) return 'เอ็ด';
+  const D = ['', 'หนึ่ง', 'สอง', 'สาม', 'สี่', 'ห้า', 'หก', 'เจ็ด', 'แปด', 'เก้า'];
+  const P = ['', 'สิบ', 'ร้อย', 'พัน', 'หมื่น', 'แสน'];
+  const s = String(n);
+  let out = '';
+  for (let i = 0; i < s.length; i++) {
+    const d = Number(s[i]), p = s.length - i - 1;
+    if (!d) continue;
+    if (p === 1 && d === 1) out += 'สิบ';
+    else if (p === 1 && d === 2) out += 'ยี่สิบ';
+    else if (p === 0 && d === 1 && s.length > 1) out += 'เอ็ด';
+    else out += D[d] + P[p];
+  }
+  return out;
+}
+
+// ---------- แม่แบบแบบใหม่ ----------
+
+/**
+ * แม่แบบแบบใหม่ (5 คอลัมน์ หัวกระดาษสีกรมท่า ตารางหัวสีเขียวอมฟ้า ยอดรวมเด่น มีจำนวนเงินตัวหนังสือ)
+ * ใช้ตัวแทนชุดเดียวกับแบบเดิม + {{dormName}} {{dueDate}} {{totalText}}
+ */
+function createModernTemplate_(folder, kind) {
+  const isRc = kind === 'receipt';
+  const NAVY = { red: 0.059, green: 0.153, blue: 0.278 };
+  const TEAL = { red: 0.102, green: 0.580, blue: 0.494 };
+  const SOFT = { red: 0.953, green: 0.965, blue: 0.976 };
+  const LINE = { red: 0.85, green: 0.88, blue: 0.91 };
+  const WHITE = { red: 1, green: 1, blue: 1 };
+  const MUTED = { red: 0.39, green: 0.45, blue: 0.53 };
+  const MINT = { red: 0.70, green: 0.92, blue: 0.87 };
+  const widths = [46, 330, 80, 110, 128];
+  const C = 5;
+  const R = {}, merges = [], heights = {}, bgRows = {};
+  function put(r, c, v, f) { (R[r] = R[r] || {})[c] = Object.assign({ v: v }, f || {}); }
+  function merge(r, c1, c2) { merges.push({ r: r, c1: c1, c2: c2 }); }
+  function band(r, color) { bgRows[r] = color; }
+
+  // หัวกระดาษ
+  [0, 1, 2].forEach(function (r) { band(r, NAVY); });
+  put(0, 0, '{{dormName}}', { b: true, size: 18, color: WHITE }); merge(0, 0, 2);
+  put(0, 3, isRc ? 'ใบเสร็จรับเงิน' : 'ใบแจ้งหนี้', { b: true, size: 18, color: WHITE, align: 'RIGHT' }); merge(0, 3, 4);
+  put(1, 0, '{{addr1}} {{addr2}}', { size: 10, color: WHITE }); merge(1, 0, 2);
+  put(1, 3, isRc ? 'RECEIPT' : 'INVOICE', { size: 10, color: MINT, b: true, align: 'RIGHT' }); merge(1, 3, 4);
+  put(2, 0, 'โทร. {{phone}}', { size: 10, color: WHITE }); merge(2, 0, 2);
+  heights[0] = 46; heights[1] = 20; heights[2] = 24; heights[3] = 30;
+
+  // ข้อมูลผู้เช่า / เอกสาร
+  put(4, 0, isRc ? 'ได้รับเงินจาก' : 'เรียกเก็บจาก', { size: 9, b: true, color: MUTED }); merge(4, 0, 1);
+  put(5, 0, 'คุณ {{tenantName}}', { size: 13, b: true }); merge(5, 0, 1);
+  put(6, 0, '{{tenantAddress}}', { size: 10 }); merge(6, 0, 1);
+  put(7, 0, 'ค่าบริการ {{periodStart}} - {{periodEnd}}', { size: 10, color: MUTED }); merge(7, 0, 1);
+  put(4, 3, 'เลขที่', { size: 10, color: MUTED, align: 'RIGHT' }); put(4, 4, '{{invoiceNo}}', { b: true, align: 'RIGHT', text: true });
+  put(5, 3, 'วันที่', { size: 10, color: MUTED, align: 'RIGHT' }); put(5, 4, '{{invoiceDate}}', { align: 'RIGHT', text: true });
+  put(6, 3, 'ห้อง', { size: 10, color: MUTED, align: 'RIGHT' }); put(6, 4, '{{roomId}}', { b: true, size: 13, align: 'RIGHT', text: true });
+  if (isRc) { put(7, 3, 'อ้างอิงใบแจ้งหนี้', { size: 10, color: MUTED, align: 'RIGHT' }); put(7, 4, '{{refNo}}', { align: 'RIGHT', text: true }); }
+  else { put(7, 3, 'ครบกำหนดชำระ', { size: 10, color: MUTED, align: 'RIGHT' }); put(7, 4, '{{dueDate}}', { b: true, align: 'RIGHT', text: true }); }
+  [4, 5, 6, 7].forEach(function (r) { heights[r] = 24; });
+  heights[8] = 12;
+
+  // ตารางรายการ
+  const H = 9;
+  ['#', 'รายการ', 'จำนวน', 'ราคาต่อหน่วย', 'จำนวนเงิน'].forEach(function (h, c) {
+    put(H, c, h, { b: true, color: WHITE, align: c === 1 ? 'LEFT' : c === 0 ? 'CENTER' : 'RIGHT' });
+  });
+  band(H, TEAL); heights[H] = 30;
+  for (let i = 1; i <= INV_MAX_ITEMS; i++) {
+    const r = H + i;
+    put(r, 0, '{{' + i + '.no}}', { align: 'CENTER', text: true, color: MUTED });
+    put(r, 1, '{{' + i + '.name}}', { text: true });
+    put(r, 2, '{{' + i + '.qty}}', { align: 'RIGHT', text: true });
+    put(r, 3, '{{' + i + '.price}}', { align: 'RIGHT', text: true });
+    put(r, 4, '{{' + i + '.total}}', { align: 'RIGHT', text: true, b: true });
+    if (i % 2 === 0) band(r, SOFT);
+    heights[r] = 26;
+  }
+  const END = H + INV_MAX_ITEMS; // แถวรายการสุดท้าย
+  heights[END + 1] = 10;
+
+  // ยอดรวม
+  const T = END + 2;
+  put(T, 0, '({{totalText}})', { size: 10, color: MUTED }); merge(T, 0, 2);
+  put(T, 3, isRc ? 'รับชำระแล้ว' : 'ยอดชำระทั้งสิ้น', { b: true, color: WHITE, align: 'RIGHT' });
+  put(T, 4, '{{total}}', { b: true, size: 15, color: WHITE, align: 'RIGHT', text: true });
+  heights[T] = 38;
+
+  // หมายเหตุ
+  const N = T + 2;
+  put(N, 0, isRc ? 'หมายเหตุ' : 'หมายเหตุ / ช่องทางชำระ', { size: 9, b: true, color: MUTED }); merge(N, 0, 4);
+  for (let i = 1; i <= INV_MAX_NOTES; i++) { put(N + i, 0, '{{note' + i + '}}', { size: 10 }); merge(N + i, 0, 4); heights[N + i] = 20; }
+  heights[T + 1] = 14;
+
+  // ลงชื่อ / ท้ายกระดาษ
+  const S = N + INV_MAX_NOTES + 2;
+  heights[S - 1] = 30;
+  put(S, 1, (isRc ? 'ผู้รับเงิน' : 'ผู้ออกเอกสาร') + '  ______________________________', { size: 10 });
+  put(S, 3, 'วันที่  ____________________', { size: 10 }); merge(S, 3, 4);
+  heights[S] = 30;
+  put(S + 2, 0, '{{footer}}', { size: 9, color: MUTED, align: 'CENTER' }); merge(S + 2, 0, 4);
+  const ROWS = S + 3;
+
+  // rowData
+  const rowData = [];
+  for (let r = 0; r < ROWS; r++) {
+    const values = [];
+    for (let c = 0; c < C; c++) {
+      const cell = (R[r] || {})[c];
+      const fmt = {
+        textFormat: { fontFamily: 'Sarabun', fontSize: cell && cell.size ? cell.size : 11, bold: !!(cell && cell.b) },
+        verticalAlignment: 'MIDDLE', wrapStrategy: 'CLIP',
+        padding: { left: 6, right: 6 },
+      };
+      if (cell && cell.color) fmt.textFormat.foregroundColor = cell.color;
+      if (cell && cell.align) fmt.horizontalAlignment = cell.align;
+      if (cell && cell.text) fmt.numberFormat = { type: 'TEXT' };
+      if (bgRows[r]) fmt.backgroundColor = bgRows[r];
+      if (r === T && c >= 3) fmt.backgroundColor = TEAL;
+      if (r === T && c < 3) fmt.backgroundColor = SOFT;
+      const v = { userEnteredFormat: fmt };
+      if (cell) v.userEnteredValue = { stringValue: cell.v };
+      values.push(v);
+    }
+    rowData.push({ values: values });
+  }
+
+  const ss = JSON.parse(gFetch_('https://sheets.googleapis.com/v4/spreadsheets', 'post', {
+    properties: { title: isRc ? 'แม่แบบ - ใบเสร็จรับเงิน (แบบใหม่)' : 'แม่แบบ - ใบแจ้งหนี้ (แบบใหม่)', locale: 'th_TH' },
+    sheets: [{
+      properties: { sheetId: 0, title: isRc ? 'ใบเสร็จ' : 'ใบแจ้งหนี้', gridProperties: { rowCount: ROWS, columnCount: C, hideGridlines: true } },
+      data: [{ startRow: 0, startColumn: 0, rowData: rowData }],
+    }],
+  }).getContentText());
+  const id = ss.spreadsheetId;
+
+  const reqs = [];
+  widths.forEach(function (w, c) {
+    reqs.push({ updateDimensionProperties: { range: { sheetId: 0, dimension: 'COLUMNS', startIndex: c, endIndex: c + 1 }, properties: { pixelSize: w }, fields: 'pixelSize' } });
+  });
+  for (let r = 0; r < ROWS; r++) {
+    reqs.push({ updateDimensionProperties: { range: { sheetId: 0, dimension: 'ROWS', startIndex: r, endIndex: r + 1 }, properties: { pixelSize: heights[r] || 21 }, fields: 'pixelSize' } });
+  }
+  merges.forEach(function (m) {
+    reqs.push({ mergeCells: { range: { sheetId: 0, startRowIndex: m.r, endRowIndex: m.r + 1, startColumnIndex: m.c1, endColumnIndex: m.c2 + 1 }, mergeType: 'MERGE_ALL' } });
+  });
+  const thin = { style: 'SOLID', width: 1, color: LINE };
+  // เส้นคั่นแถวรายการ + เส้นล่างตาราง
+  reqs.push({ updateBorders: { range: { sheetId: 0, startRowIndex: H + 1, endRowIndex: END + 1, startColumnIndex: 0, endColumnIndex: C }, innerHorizontal: thin, bottom: { style: 'SOLID_MEDIUM', color: TEAL } } });
+  // เส้นใต้ส่วนข้อมูลผู้เช่า
+  reqs.push({ updateBorders: { range: { sheetId: 0, startRowIndex: 7, endRowIndex: 8, startColumnIndex: 0, endColumnIndex: C }, bottom: thin } });
+  // ข้อความหมายเหตุตัดบรรทัดได้
+  reqs.push({ repeatCell: { range: { sheetId: 0, startRowIndex: N + 1, endRowIndex: N + 1 + INV_MAX_NOTES, startColumnIndex: 0, endColumnIndex: C },
+    cell: { userEnteredFormat: { wrapStrategy: 'WRAP' } }, fields: 'userEnteredFormat.wrapStrategy' } });
+  gFetch_('https://sheets.googleapis.com/v4/spreadsheets/' + id + ':batchUpdate', 'post', { requests: reqs });
+
+  DriveApp.getFileById(id).moveTo(folder);
+  return id;
+}
+
+/**
+ * ตัวอย่างเอกสารของแต่ละรูปแบบ (ใช้ใบแจ้งหนี้ล่าสุดเป็นข้อมูลตัวอย่าง ไม่บันทึกอะไร)
+ * kind: 'invoice' | 'receipt' ; style: 'classic' | 'modern'
+ */
+function apiPreviewDoc(token, kind, style) {
+  requireSession_(token, 'admin');
+  const settings = getSettings_();
+  style = docStyle_(settings, style);
+  const all = fsList_(COL.INVOICES).filter(function (i) { return i.status !== 'cancelled' && (i.items || []).length; });
+  all.sort(function (a, b) { return String(b.issuedAt || '').localeCompare(String(a.issuedAt || '')); });
+  const inv = all[0] || {
+    roomId: '101', month: thisMonthIso_(), number: '25690000-001', tenantName: 'ตัวอย่าง ผู้เช่า', tenantAddress: '',
+    periodStart: monthPeriod_(thisMonthIso_()).start, periodEnd: monthPeriod_(thisMonthIso_()).end,
+    issuedAt: today_(), dueDate: today_(), total: 3500,
+    items: [{ name: 'ค่าห้อง', qty: 1, price: 3000, amount: 3000 }, { name: 'ค่าไฟ', qty: 50, price: 8, amount: 400 }, { name: 'ค่าน้ำ', qty: 5, price: 20, amount: 100 }],
+  };
+  const fileId = kind === 'receipt'
+    ? renderReceiptPdf_(settings, inv, { number: 'ตัวอย่าง', paidAt: today_() }, 'ต้นฉบับ', style)
+    : renderInvoicePdf_(settings, inv, style);
+  const f = DriveApp.getFileById(fileId);
+  const blob = f.getBlob();
+  f.setTrashed(true);
+  return { name: 'ตัวอย่าง.pdf', mimeType: 'application/pdf', data: Utilities.base64Encode(blob.getBytes()) };
+}
+function thisMonthIso_() { return today_().slice(0, 7); }

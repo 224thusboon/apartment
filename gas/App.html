@@ -340,12 +340,12 @@
     return res;
   }
 
-  async function viewFile(fileId, title, src) {
+  async function viewFile(fileId, title, src, preload) {
     const rcId = src && src.dataset.receipt;
     const asAdminReceipt = rcId && state.role === 'admin';
     const body = openModal(title || 'ไฟล์', '<div class="center muted">กำลังโหลดไฟล์…</div>');
     try {
-      const f = await api('apiGetFile', fileId);
+      const f = preload ? await preload() : await api('apiGetFile', fileId);
       const bin = atob(f.data);
       const bytes = new Uint8Array(bin.length);
       for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
@@ -1477,6 +1477,22 @@
         </div>
       </form>
       <div class="card" style="margin-top:16px">
+        <div class="li"><span class="ic">${ic('bill')}</span><div><strong>รูปแบบใบแจ้งหนี้และใบเสร็จ</strong>
+          <div class="muted" style="font-size:14px">ใช้กับเอกสารที่ออกหลังจากเปลี่ยน ใบที่ออกไปแล้วไม่เปลี่ยน (กด "ออกใหม่" ถ้าต้องการให้ใบที่ยังไม่ชำระเป็นแบบใหม่)</div></div></div>
+        <div class="styles">
+          ${[['classic', 'แบบเดิม', 'ตารางเส้นตามใบ Excel เดิมของหอ'], ['modern', 'แบบใหม่', 'หัวกระดาษสีกรมท่า ตารางอ่านง่าย ยอดรวมเด่น มีจำนวนเงินเป็นตัวหนังสือ และวันครบกำหนดชำระ']].map(([k, n, d]) => `
+          <label class="style-opt${(s.invoiceStyle || 'classic') === k ? ' on' : ''}">
+            <input type="radio" name="invoiceStyle" value="${k}" ${(s.invoiceStyle || 'classic') === k ? 'checked' : ''}>
+            <span class="sw sw-${k}"><i></i><i></i><i></i></span>
+            <strong>${n}</strong><span class="muted">${d}</span>
+            <span class="row" style="margin-top:8px">
+              <button type="button" class="small ghost" data-prev="invoice" data-style="${k}">ดูใบแจ้งหนี้</button>
+              <button type="button" class="small ghost" data-prev="receipt" data-style="${k}">ดูใบเสร็จ</button>
+            </span>
+          </label>`).join('')}
+        </div>
+      </div>
+      <div class="card" style="margin-top:16px">
         <div class="li"><span class="ic">${ic('file')}</span><div><strong>แม่แบบเอกสาร</strong><div class="muted" style="font-size:14px">แก้หน้าตาได้ใน Google Sheets / Docs โดยคงตัวแทน {{...}} ไว้</div></div></div>
         <p class="row">
           ${s.invoiceTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https:\/\/docs.google.com/spreadsheets/d/${encodeURIComponent(s.invoiceTemplateId)}/edit">แม่แบบใบแจ้งหนี้</a>` : ''}
@@ -1486,6 +1502,20 @@
       </div>
       <div id="sysArea"><div class="center muted">กำลังโหลดข้อมูลระบบ…</div></div>`;
     loadSystemPanel();
+    $$('input[name=invoiceStyle]').forEach((r) => {
+      r.onchange = async () => {
+        $$('.style-opt').forEach((x) => x.classList.toggle('on', $('input', x).checked));
+        try { await api('apiSaveSettings', { invoiceStyle: r.value }); toast('ใช้รูปแบบ' + (r.value === 'modern' ? 'ใหม่' : 'เดิม') + 'แล้ว'); } catch (e) { fail(e); }
+      };
+    });
+    $$('[data-prev]').forEach((b) => {
+      b.onclick = (e) => {
+        e.preventDefault();
+        const kind = b.dataset.prev, style = b.dataset.style;
+        viewFile('', `ตัวอย่าง${kind === 'receipt' ? 'ใบเสร็จ' : 'ใบแจ้งหนี้'} ${style === 'modern' ? 'แบบใหม่' : 'แบบเดิม'}`, null,
+          () => api('apiPreviewDoc', kind, style));
+      };
+    });
     $('#setForm').onsubmit = (e) => {
       e.preventDefault();
       const f = formData(e.target);
