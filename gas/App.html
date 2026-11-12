@@ -1658,7 +1658,8 @@
         <div class="list-item row spread"><span>${esc(b.name)}</span><span class="muted" style="font-size:13px">${thDate(b.at)} · ${fmt(b.size / 1024)} KB</span></div>`).join('') : '<span class="muted">ยังไม่มีไฟล์สำรอง</span>'}</div>
 
       ${sec('บันทึกการทำงาน', `<input type="month" id="auditMon" value="${auditMonth}" style="width:auto">`)}
-      <div class="card scroll-x">${logs.length ? `<table style="font-size:14px">
+      ${logs.length ? `<p class="muted" style="font-size:13px;margin:-6px 0 8px">${logs.length} รายการ · เลื่อนในกรอบเพื่อดูรายการเก่า</p>` : ''}
+      <div class="card log-box">${logs.length ? `<table style="font-size:14px">
         <thead><tr><th>เวลา</th><th>ผู้ทำ</th><th>การทำงาน</th><th>รายละเอียด</th></tr></thead>
         <tbody>${logs.map((l) => `<tr>
           <td style="white-space:nowrap">${thDate(l.at)} ${new Date(l.at).toLocaleTimeString('th-TH', { hour: '2-digit', minute: '2-digit' })}</td>
