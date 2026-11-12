@@ -31,7 +31,11 @@ function monthSheet_(month) {
   const readings = {};
   r[2].concat(r[3]).forEach(function (x) { readings[x.id] = x; });
   const invoices = {};
-  r[4].forEach(function (i) { invoices[i.roomId] = i; });
+  // ใบที่ใช้งานอยู่มาก่อนใบที่ยกเลิก (ห้องเดียวกันอาจมีใบยกเลิกหลายใบในเดือนเดียว)
+  r[4].forEach(function (i) {
+    const cur = invoices[i.roomId];
+    if (!cur || (cur.status === 'cancelled' && i.status !== 'cancelled')) invoices[i.roomId] = i;
+  });
 
   const rows = rooms.map(function (room) {
     const t = tenancies[room.currentTenancyId] || {};
