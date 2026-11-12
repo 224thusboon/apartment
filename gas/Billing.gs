@@ -361,6 +361,37 @@ function apiUpdateInvoice(token, invoiceId, data) {
  * ยกเลิกใบแจ้งหนี้: ย้ายไปเก็บเป็นประวัติ (id ใหม่) สถานะ cancelled
  * ห้องนั้นออกใบใหม่ของเดือนเดียวกันได้ (ได้เลขที่ใหม่)
  */
+/**
+ * ทำ PDF ใหม่ของใบแจ้งหนี้ (และใบเสร็จถ้ามี) ด้วยรูปแบบปัจจุบันและลายเซ็นของผู้กด
+ * เลขที่ ยอดเงิน และจำนวนครั้งที่พิมพ์ไม่เปลี่ยน ไฟล์เดิมย้ายลงถังขยะ
+ */
+function apiRerenderDocs(token, invoiceId) {
+  const me = requireSession_(token, 'admin');
+  const signer = signer_(me);
+  if (!signer) throw new Error('เข้าด้วยรหัส master จะไม่มีลายเซ็น กรุณาเข้าด้วยอีเมลของตัวเอง');
+  const settings = getSettings_();
+  const inv = fsGet_(COL.INVOICES, invoiceId);
+  if (!inv || inv.status === 'cancelled') throw new Error('ไม่พบใบแจ้งหนี้');
+  const trash = function (id) { if (id) { try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { /* ไม่มีไฟล์ */ } } };
+  const upd = { issuedBy: signer.name };
+  upd.pdfFileId = renderInvoicePdf_(settings, inv, null, signer);
+  trash(inv.pdfFileId);
+  let rcNo = '';
+  if (inv.receiptId) {
+    const rc = fsGet_(COL.RECEIPTS, inv.receiptId);
+    if (rc && rc.status !== 'void') {
+      const f = renderReceiptPair_(settings, inv, rc, signer);
+      trash(inv.receiptPdfId); trash(inv.receiptOrigId);
+      upd.receiptPdfId = f.copy; upd.receiptOrigId = f.orig;
+      fsUpdate_(COL.RECEIPTS, rc.id, { pdfFileId: f.copy, origFileId: f.orig, issuedBy: signer.name, issuedById: me.adminId });
+      rcNo = rc.number;
+    }
+  }
+  fsUpdate_(COL.INVOICES, invoiceId, upd);
+  audit_(me, 'ทำ PDF ใหม่', 'ห้อง ' + inv.roomId + ' ใบแจ้งหนี้ ' + (inv.number || ''), (rcNo ? 'รวมใบเสร็จ ' + rcNo + ' · ' : '') + 'ลงนามโดย ' + signer.name);
+  return true;
+}
+
 function apiCancelInvoice(token, invoiceId, reason) {
   const me = requireSession_(token, 'admin');
   const inv = fsGet_(COL.INVOICES, invoiceId);

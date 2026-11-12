@@ -835,6 +835,7 @@
         <button type="button" class="small ghost" data-addcharge="${esc(roomId)}">${ic('plus')} เพิ่ม</button>
       </div>`;
     $('#view').innerHTML = `
+      ${state.master ? `<div class="card alert-bad" style="font-size:14px"><strong>เข้าระบบด้วยรหัส master</strong> · ใบแจ้งหนี้และใบเสร็จที่ออกตอนนี้จะไม่มีลายเซ็นและชื่อผู้ออก ควรเข้าด้วยอีเมลของตัวเอง</div>` : ''}
       ${sec(`จดมิเตอร์ ${thMonth(month)}`, `<input type="month" id="mon" value="${month}" style="width:auto">`)}
       <p class="muted" style="font-size:14px;margin-top:-6px">กรอกเลขมิเตอร์สิ้นเดือน หน่วยที่ใช้คิดจากเลขเดือนก่อน · รายการเพิ่ม (เช่น ค่าซ่อม) ของแต่ละห้องจะรวมเข้าบิลห้องนั้นเดือนนี้</p>
       ${rows.length ? `<div class="meter" id="meter">
@@ -895,6 +896,7 @@
             ${i.receiptPdfId ? `<button type="button" class="small ghost" data-file="${esc(i.receiptPdfId)}" data-receipt="${esc(i.id)}" data-orig="${Number(i.receiptOrigPrints) || 0}" data-title="ใบเสร็จ ${esc(i.receiptNo || '')}">ใบเสร็จ${i.receiptOrigPrints ? '' : ' (ยังไม่พิมพ์ต้นฉบับ)'}</button>` : ''}
             ${i.status !== 'paid' ? `<button type="button" class="small ghost" data-editinv="${esc(i.id)}">แก้ไข</button>
             <button type="button" class="small ghost" data-cancelinv="${esc(i.id)}" style="color:var(--bad);border-color:var(--bad)">ยกเลิกใบนี้</button>` : ''}
+            <button type="button" class="small ghost" data-rerender="${esc(i.id)}" title="สร้าง PDF ใหม่ด้วยรูปแบบปัจจุบันและลายเซ็นของคุณ">ทำ PDF ใหม่</button>
           </div>
         </div>`).join('') : '<span class="muted">ยังไม่ได้ออกใบแจ้งหนี้</span>'}</div>
       ${cancelled.length ? `<details class="card"><summary class="muted">ใบที่ยกเลิกแล้ว (${cancelled.length})</summary>
@@ -978,6 +980,13 @@
       };
     });
     $$('[data-editinv]').forEach((b) => { b.onclick = () => invoiceForm(invoices.find((x) => x.id === b.dataset.editinv), month); });
+    $$('[data-rerender]').forEach((b) => {
+      b.onclick = async () => {
+        const inv = invoices.find((x) => x.id === b.dataset.rerender);
+        if (!(await ask(`ทำ PDF ใหม่ของห้อง ${inv.roomId}${inv.receiptNo ? ' (ใบแจ้งหนี้และใบเสร็จ)' : ''}?\nใช้รูปแบบเอกสารปัจจุบันและลายเซ็นของคุณ เลขที่และยอดเงินไม่เปลี่ยน`, { ok: 'ทำ PDF ใหม่' }))) return;
+        busy(b, async () => { await api('apiRerenderDocs', inv.id); toast('ทำ PDF ใหม่แล้ว'); adminBilling(month); });
+      };
+    });
     $$('[data-cancelinv]').forEach((b) => {
       b.onclick = async () => {
         const inv = invoices.find((x) => x.id === b.dataset.cancelinv);
@@ -1328,6 +1337,7 @@
   }
   function drawPayments(status, rows) {
     $('#view').innerHTML = `
+      ${state.master ? `<div class="card alert-bad" style="font-size:14px"><strong>เข้าระบบด้วยรหัส master</strong> · ใบเสร็จที่ออกจากการอนุมัติตอนนี้จะไม่มีลายเซ็นและชื่อผู้ออก ควรเข้าด้วยอีเมลของตัวเอง</div>` : ''}
       ${sec('สลิปโอนเงิน', `<select id="pf" style="width:auto"><option value="pending">รอตรวจ</option><option value="">ทั้งหมด</option></select>`)}
       <div class="card">${rows.length ? rows.map((p) => `
         <div class="list-item">
