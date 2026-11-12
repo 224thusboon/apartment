@@ -26,6 +26,7 @@ function allEntries_(invoices, repairs, ledger) {
       note: 'ห้อง ' + i.roomId + ' · บิล ' + thaiMonth_(i.month),
       invoiceNo: i.number || '', receiptNo: i.receiptNo || '',
       invoiceFileId: i.pdfFileId || '', fileId: i.receiptPdfId || '',
+      invoiceId: i.id, origPrints: Number(i.receiptOrigPrints) || 0,
     });
   });
   repairs.forEach(function (r) {

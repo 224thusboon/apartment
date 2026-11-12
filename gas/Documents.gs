@@ -113,7 +113,7 @@ function apiGetFile(token, fileId) {
       const i = p.indexOf(':');
       if (i > 0) tags[p.slice(0, i)] = p.slice(i + 1);
     });
-    if (tags.room !== s.roomId || (tags.tenancy && tags.tenancy !== s.tenancyId)) throw new Error('ไม่มีสิทธิ์เปิดไฟล์นี้');
+    if (tags.room !== s.roomId || (tags.tenancy && tags.tenancy !== s.tenancyId) || tags.orig) throw new Error('ไม่มีสิทธิ์เปิดไฟล์นี้');
   }
   const blob = f.getBlob();
   return { name: f.getName(), mimeType: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) };

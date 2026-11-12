@@ -188,8 +188,11 @@ function renderInvoicePdf_(settings, inv) {
   return renderSheetPdf_(settings, settings.invoiceTemplateId, 'ใบแจ้งหนี้ ' + inv.roomId + ' ' + inv.month, inv.roomId, map);
 }
 
-/** ใบเสร็จ: รายการเดียวกับใบแจ้งหนี้ อ้างอิงเลขที่ใบแจ้งหนี้ */
-function renderReceiptPdf_(settings, inv, rc) {
+/**
+ * ใบเสร็จ: รายการเดียวกับใบแจ้งหนี้ อ้างอิงเลขที่ใบแจ้งหนี้
+ * label: 'ต้นฉบับ' หรือ 'สำเนา' พิมพ์เป็นกรอบมุมขวาบน
+ */
+function renderReceiptPdf_(settings, inv, rc, label) {
   const tid = ensureReceiptTemplate_(settings);
   const map = docMap_(settings, inv, {
     docNo: rc.number, docDate: rc.paidAt, refNo: inv.number || '-',
@@ -200,7 +203,8 @@ function renderReceiptPdf_(settings, inv, rc) {
     ],
     footer: '',
   });
-  return renderSheetPdf_(settings, tid, 'ใบเสร็จ ' + rc.number + ' ห้อง ' + inv.roomId, inv.roomId, map);
+  return renderSheetPdf_(settings, tid, 'ใบเสร็จ ' + rc.number + ' ห้อง ' + inv.roomId + (label ? ' (' + label + ')' : ''),
+    inv.roomId, map, label);
 }
 
 function docMap_(settings, inv, o) {
@@ -229,13 +233,26 @@ function docMap_(settings, inv, o) {
 }
 
 /** คัดลอกแม่แบบ Sheets -> แทนค่า -> export PDF -> ลบสำเนา */
-function renderSheetPdf_(settings, templateId, name, roomId, map) {
+function renderSheetPdf_(settings, templateId, name, roomId, map, label) {
   const folder = DriveApp.getFolderById(settings.pdfFolderId);
   const copy = DriveApp.getFileById(templateId).makeCopy(name, folder);
   try {
     const reqs = Object.keys(map).map(function (k) {
       return { findReplace: { find: '{{' + k + '}}', replacement: String(map[k]), allSheets: true, matchCase: true } };
     });
+    if (label) {
+      // กรอบ ต้นฉบับ/สำเนา ที่ช่อง G4 (แถวว่างใต้ชื่อเอกสาร)
+      const line = { style: 'SOLID_MEDIUM', color: { red: 0, green: 0, blue: 0 } };
+      const cell = { sheetId: 0, startRowIndex: 3, endRowIndex: 4, startColumnIndex: 6, endColumnIndex: 7 };
+      reqs.push({ updateCells: {
+        range: cell, fields: 'userEnteredValue,userEnteredFormat',
+        rows: [{ values: [{ userEnteredValue: { stringValue: label }, userEnteredFormat: {
+          horizontalAlignment: 'CENTER', verticalAlignment: 'MIDDLE',
+          textFormat: { fontFamily: 'Sarabun', fontSize: 13, bold: true },
+        } }] }],
+      } });
+      reqs.push({ updateBorders: { range: cell, top: line, bottom: line, left: line, right: line } });
+    }
     gFetch_('https://sheets.googleapis.com/v4/spreadsheets/' + copy.getId() + ':batchUpdate', 'post', { requests: reqs });
     const url = 'https://docs.google.com/spreadsheets/d/' + copy.getId() + '/export?format=pdf&size=A4&portrait=true' +
       '&fitw=true&gridlines=false&printtitle=false&sheetnames=false&pagenum=UNDEFINED&fzr=false' +

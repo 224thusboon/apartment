@@ -249,38 +249,58 @@
   }
 
   // พิมพ์เอกสาร: วาดแต่ละหน้าเป็นรูปความละเอียดสูงในพื้นที่พิมพ์ แล้วสั่งพิมพ์เฉพาะส่วนนั้น
-  async function printDoc(pdfBytes, imgUrl) {
+  // files: [{mimeType, bytes(Uint8Array)}] หลายไฟล์ต่อกันเป็นงานพิมพ์เดียว
+  const b64bytes = (data) => {
+    const bin = atob(data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return bytes;
+  };
+  async function printFiles(files, onProgress) {
     let area = $('#printArea');
     if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
     area.innerHTML = '';
-    area.className = pdfBytes ? 'is-pdf' : 'is-img';
-    const add = (src) => new Promise((ok) => {
+    const add = (src, cls) => new Promise((ok) => {
       const im = new Image();
+      im.className = cls;
       im.onload = im.onerror = () => ok();
       im.src = src;
       area.appendChild(im);
     });
-    if (pdfBytes) {
-      const lib = await loadPdfJs();
-      const pdf = await lib.getDocument({ data: pdfBytes, cMapUrl: PDFJS + 'cmaps/', cMapPacked: true }).promise;
-      for (let n = 1; n <= pdf.numPages; n++) {
-        const page = await pdf.getPage(n);
-        const vp = page.getViewport({ scale: 2.5 });
-        const c = document.createElement('canvas');
-        c.width = Math.floor(vp.width);
-        c.height = Math.floor(vp.height);
-        await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
-        await add(c.toDataURL('image/jpeg', 0.92));
+    for (let k = 0; k < files.length; k++) {
+      if (onProgress) onProgress(k + 1, files.length);
+      const f = files[k];
+      if (f.mimeType === 'application/pdf') {
+        const lib = await loadPdfJs();
+        const pdf = await lib.getDocument({ data: f.bytes, cMapUrl: PDFJS + 'cmaps/', cMapPacked: true }).promise;
+        for (let n = 1; n <= pdf.numPages; n++) {
+          const page = await pdf.getPage(n);
+          const vp = page.getViewport({ scale: 2.5 });
+          const c = document.createElement('canvas');
+          c.width = Math.floor(vp.width);
+          c.height = Math.floor(vp.height);
+          await page.render({ canvasContext: c.getContext('2d'), viewport: vp }).promise;
+          await add(c.toDataURL('image/jpeg', 0.92), 'pg-pdf');
+        }
+      } else if (f.mimeType.indexOf('image/') === 0) {
+        await add(URL.createObjectURL(new Blob([f.bytes], { type: f.mimeType })), 'pg-img');
       }
-    } else {
-      await add(imgUrl);
     }
     const done = () => { area.innerHTML = ''; window.removeEventListener('afterprint', done); };
     window.addEventListener('afterprint', done);
     window.print();
   }
 
-  async function viewFile(fileId, title) {
+  // ใบเสร็จ: แอดมินเลือกพิมพ์ต้นฉบับหรือสำเนา (เปิดดูไม่นับเป็นการพิมพ์)
+  async function printReceipts(ids, kind, onProgress) {
+    const res = await api('apiPrintDocs', ids, kind);
+    await printFiles(res.map((r) => ({ mimeType: r.mimeType, bytes: b64bytes(r.data) })), onProgress);
+    return res;
+  }
+
+  async function viewFile(fileId, title, src) {
+    const rcId = src && src.dataset.receipt;
+    const asAdminReceipt = rcId && state.role === 'admin';
     const body = openModal(title || 'ไฟล์', '<div class="center muted">กำลังโหลดไฟล์…</div>');
     try {
       const f = await api('apiGetFile', fileId);
@@ -291,14 +311,43 @@
       const isImg = f.mimeType.indexOf('image/') === 0;
       const isPdf = f.mimeType === 'application/pdf';
       body.innerHTML = `<div class="viewer">${isImg ? `<img src="${url}" alt="">` : isPdf ? '<div class="pdf-pages"><div class="center muted">กำลังแสดง PDF…</div></div>' : ''}</div>
-        <p class="row">${isImg || isPdf ? `<button type="button" class="btn" id="btnPrint">${ic('print')} พิมพ์</button>` : ''}
+        ${asAdminReceipt ? `<p class="muted" style="font-size:14px;margin-bottom:6px" id="origInfo"></p>` : ''}
+        <p class="row">${asAdminReceipt ? `<button type="button" class="btn" id="btnOrig">${ic('print')} พิมพ์ต้นฉบับ</button>
+          <button type="button" class="btn ghost" id="btnCopy">${ic('print')} พิมพ์สำเนา</button>`
+          : isImg || isPdf ? `<button type="button" class="btn" id="btnPrint">${ic('print')} พิมพ์</button>` : ''}
         <a class="btn ghost" href="${url}" download="${esc(f.name)}">ดาวน์โหลด ${esc(f.name)}</a></p>`;
+      if (asAdminReceipt) {
+        const info = () => {
+          const n = Number(src.dataset.orig) || 0;
+          $('#origInfo', body).textContent = n ? `พิมพ์ต้นฉบับไปแล้ว ${n} ครั้ง ถ้าพิมพ์อีกจะบันทึกเป็นการออกต้นฉบับซ้ำ` : 'ยังไม่เคยพิมพ์ต้นฉบับ · ที่แสดงบนจอนี้เป็นสำเนา';
+          $('#btnOrig', body).innerHTML = ic('print') + (n ? ' พิมพ์ต้นฉบับซ้ำ' : ' พิมพ์ต้นฉบับ');
+        };
+        info();
+        const run = (btn, kind) => {
+          btn.onclick = async () => {
+            if (kind === 'original' && Number(src.dataset.orig) > 0 && !confirm('ใบเสร็จนี้พิมพ์ต้นฉบับไปแล้ว ต้องการออกต้นฉบับซ้ำ?')) return;
+            const old = btn.innerHTML;
+            btn.disabled = true;
+            btn.textContent = 'กำลังเตรียมพิมพ์…';
+            try {
+              const r = await printReceipts([rcId], kind);
+              if (r[0]) src.dataset.orig = r[0].origPrints;
+              info();
+              state.cache = {};
+            } catch (err) { fail(err); }
+            btn.disabled = false;
+            if (btn.id !== 'btnOrig') btn.innerHTML = old;
+          };
+        };
+        run($('#btnOrig', body), 'original');
+        run($('#btnCopy', body), 'copy');
+      }
       const pb = $('#btnPrint', body);
       if (pb) pb.onclick = async () => {
         pb.disabled = true;
         const old = pb.innerHTML;
         pb.textContent = 'กำลังเตรียมพิมพ์…';
-        try { await printDoc(isPdf ? bytes.slice() : null, isImg ? url : null); }
+        try { await printFiles([{ mimeType: f.mimeType, bytes: bytes.slice() }]); }
         catch (err) { toast('พิมพ์ไม่ได้: ' + err.message); }
         pb.disabled = false; pb.innerHTML = old;
       };
@@ -310,7 +359,7 @@
   }
   document.addEventListener('click', (e) => {
     const b = e.target.closest('[data-file]');
-    if (b) viewFile(b.dataset.file, b.dataset.title);
+    if (b) viewFile(b.dataset.file, b.dataset.title, b);
   });
 
   // ================= แท็บ =================
@@ -599,7 +648,7 @@
           <div class="grow">${thMonth(i.month)} · <strong>${fmt(i.total)} ฿</strong> <span class="muted">${esc(i.tenantName)}</span>
             <div class="muted" style="font-size:13px">ใบแจ้งหนี้ ${esc(i.number || '-')}${i.receiptNo ? ' → ใบเสร็จ ' + esc(i.receiptNo) : ''}</div></div>
           <div>${pill(i.status)} ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.number || i.month)}">ใบแจ้งหนี้</button>` : ''}
-            ${i.receiptPdfId ? `<button type="button" class="small ghost" data-file="${esc(i.receiptPdfId)}" data-title="ใบเสร็จ ${esc(i.receiptNo || '')}">ใบเสร็จ</button>` : ''}</div>
+            ${i.receiptPdfId ? `<button type="button" class="small ghost" data-file="${esc(i.receiptPdfId)}" data-receipt="${esc(i.id)}" data-orig="${Number(i.receiptOrigPrints) || 0}" data-title="ใบเสร็จ ${esc(i.receiptNo || '')}">ใบเสร็จ</button>` : ''}</div>
         </div>`).join('') : '<span class="muted">ยังไม่มี</span>'}</div>`;
 
     const refresh = () => { openRoom(roomId); if (state.tab === 'rooms') adminRooms(); };
@@ -732,7 +781,7 @@
       </div>
       <div id="genResult" style="margin-top:12px"></div>
 
-      ${sec(`ใบแจ้งหนี้ ${thMonth(month)}`)}
+      ${sec(`ใบแจ้งหนี้ ${thMonth(month)}`, active.length ? `<button type="button" class="small" id="batchPrint">${ic('print')} พิมพ์หลายห้อง</button>` : '')}
       <div class="card">${active.length ? active.map((i) => `
         <div class="list-item">
           <div class="row spread">
@@ -745,7 +794,7 @@
           </div>
           <div class="row" style="margin-top:6px">
             ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.number || i.roomId)}">ใบแจ้งหนี้</button>` : ''}
-            ${i.receiptPdfId ? `<button type="button" class="small ghost" data-file="${esc(i.receiptPdfId)}" data-title="ใบเสร็จ ${esc(i.receiptNo || '')}">ใบเสร็จ</button>` : ''}
+            ${i.receiptPdfId ? `<button type="button" class="small ghost" data-file="${esc(i.receiptPdfId)}" data-receipt="${esc(i.id)}" data-orig="${Number(i.receiptOrigPrints) || 0}" data-title="ใบเสร็จ ${esc(i.receiptNo || '')}">ใบเสร็จ${i.receiptOrigPrints ? '' : ' (ยังไม่พิมพ์ต้นฉบับ)'}</button>` : ''}
             ${i.status !== 'paid' ? `<button type="button" class="small ghost" data-editinv="${esc(i.id)}">แก้ไข</button>
             <button type="button" class="small ghost" data-cancelinv="${esc(i.id)}" style="color:var(--bad);border-color:var(--bad)">ยกเลิกใบนี้</button>` : ''}
           </div>
@@ -755,6 +804,7 @@
       </details>` : ''}`;
 
     $('#mon').onchange = (e) => e.target.value && go_billing(e.target.value);
+    if ($('#batchPrint')) $('#batchPrint').onclick = () => batchPrint(month, active);
     const collect = () => $$('#meter tbody tr').map((tr) => ({
       roomId: tr.dataset.room, water: $('[name=water]', tr).value, electric: $('[name=electric]', tr).value,
     }));
@@ -789,6 +839,73 @@
         busy(b, async () => { await api('apiCancelInvoice', inv.id, reason); toast('ยกเลิกแล้ว กดออกใบแจ้งหนี้ใหม่ได้'); adminBilling(month); });
       };
     });
+  }
+
+  // พิมพ์ใบแจ้งหนี้/ใบเสร็จหลายห้องในครั้งเดียว (1 ใบต่อ A4 เรียงตามเลขห้อง)
+  function batchPrint(month, invoices) {
+    const b = openModal('พิมพ์หลายห้อง · ' + thMonth(month), `
+      <label>เอกสาร</label>
+      <div class="row" style="margin-bottom:10px">
+        <label class="row" style="font-weight:400;color:var(--text)"><input type="radio" name="kind" value="invoice" checked style="width:auto"> ใบแจ้งหนี้</label>
+        <label class="row" style="font-weight:400;color:var(--text)"><input type="radio" name="kind" value="original" style="width:auto"> ใบเสร็จ ต้นฉบับ</label>
+        <label class="row" style="font-weight:400;color:var(--text)"><input type="radio" name="kind" value="copy" style="width:auto"> ใบเสร็จ สำเนา</label>
+      </div>
+      <div class="row spread"><span class="muted" id="bpCount"></span>
+        <span class="row"><button type="button" class="small ghost" id="bpAll">เลือกทั้งหมด</button>
+        <button type="button" class="small ghost" id="bpNone">ไม่เลือก</button></span></div>
+      <div id="bpList" class="card" style="max-height:46vh;overflow:auto;margin-top:8px"></div>
+      <p class="muted" id="bpMsg" style="font-size:14px"></p>
+      <p><button type="button" id="bpGo">${ic('print')} พิมพ์</button></p>`);
+    const kind = () => $('input[name=kind]:checked', b).value;
+    const list = () => kind() === 'invoice' ? invoices.filter((i) => i.pdfFileId) : invoices.filter((i) => i.receiptPdfId);
+    const count = () => {
+      const n = $$('#bpList input:checked', b).length;
+      $('#bpCount', b).textContent = `เลือก ${n} ห้อง`;
+      $('#bpGo', b).disabled = !n;
+    };
+    const draw = () => {
+      const k = kind();
+      const rows = list();
+      $('#bpList', b).innerHTML = rows.length ? rows.map((i) => {
+        const n = Number(i.receiptOrigPrints) || 0;
+        const on = k === 'original' ? !n : true;
+        return `<label class="list-item row" style="font-weight:400;color:var(--text)">
+          <input type="checkbox" value="${esc(i.id)}" ${on ? 'checked' : ''} style="width:auto">
+          <span class="grow"><strong>ห้อง ${esc(i.roomId)}</strong> ${esc(i.tenantName || '')}
+          <span class="muted" style="font-size:13px">${k === 'invoice' ? 'เลขที่ ' + esc(i.number || '-') : 'ใบเสร็จ ' + esc(i.receiptNo || '-') + (n ? ' · พิมพ์ต้นฉบับแล้ว ' + n + ' ครั้ง' : ' · ยังไม่พิมพ์ต้นฉบับ')}</span></span></label>`;
+      }).join('') : `<span class="muted">${k === 'invoice' ? 'ยังไม่มีใบแจ้งหนี้' : 'ยังไม่มีใบเสร็จในเดือนนี้ (ออกให้เมื่อยืนยันการโอน)'}</span>`;
+      $('#bpMsg', b).textContent = k === 'original' ? 'ห้องที่พิมพ์ต้นฉบับไปแล้วจะไม่ถูกเลือกไว้ ถ้าเลือกจะเป็นการออกต้นฉบับซ้ำ (บันทึกในประวัติ)' : '';
+      $$('#bpList input', b).forEach((x) => { x.onchange = count; });
+      count();
+    };
+    $$('input[name=kind]', b).forEach((x) => { x.onchange = draw; });
+    $('#bpAll', b).onclick = () => { $$('#bpList input', b).forEach((x) => { x.checked = true; }); count(); };
+    $('#bpNone', b).onclick = () => { $$('#bpList input', b).forEach((x) => { x.checked = false; }); count(); };
+    $('#bpGo', b).onclick = async () => {
+      const ids = $$('#bpList input:checked', b).map((x) => x.value);
+      const k = kind();
+      if (k === 'original') {
+        const again = invoices.filter((i) => ids.indexOf(i.id) >= 0 && Number(i.receiptOrigPrints) > 0).map((i) => i.roomId);
+        if (again.length && !confirm(`ห้อง ${again.join(', ')} พิมพ์ต้นฉบับไปแล้ว ต้องการออกต้นฉบับซ้ำ?`)) return;
+      }
+      const btn = $('#bpGo', b);
+      btn.disabled = true;
+      btn.textContent = 'กำลังดึงเอกสาร…';
+      try {
+        const res = await api('apiPrintDocs', ids, k);
+        await printFiles(res.map((r) => ({ mimeType: r.mimeType, bytes: b64bytes(r.data) })),
+          (x, n) => { btn.textContent = `กำลังเตรียมหน้า ${x}/${n}…`; });
+        if (k !== 'invoice') {
+          res.forEach((r) => { const i = invoices.find((v) => v.id === r.invoiceId); if (i) i.receiptOrigPrints = r.origPrints; });
+          state.cache = {};
+          adminBilling(month);
+        }
+      } catch (err) { fail(err); }
+      btn.disabled = false;
+      btn.innerHTML = ic('print') + ' พิมพ์';
+      draw();
+    };
+    draw();
   }
 
   // แก้ใบแจ้งหนี้: เลขที่ + รายการ
@@ -1020,7 +1137,7 @@
             ${e.source === 'invoice' ? `<div class="muted" style="font-size:13px">ใบแจ้งหนี้ ${esc(e.invoiceNo || '-')} → ใบเสร็จ ${esc(e.receiptNo || '-')}</div>` : ''}</div>
           <div class="row">
             ${e.invoiceFileId ? `<button type="button" class="small ghost" data-file="${esc(e.invoiceFileId)}" data-title="ใบแจ้งหนี้ ${esc(e.invoiceNo || '')}">ใบแจ้งหนี้</button>` : ''}
-            ${e.fileId ? `<button type="button" class="small ghost" data-file="${esc(e.fileId)}" data-title="ใบเสร็จ ${esc(e.receiptNo || '')}">ใบเสร็จ</button>` : ''}
+            ${e.fileId ? `<button type="button" class="small ghost" data-file="${esc(e.fileId)}" ${e.source === 'invoice' ? `data-receipt="${esc(e.invoiceId)}" data-orig="${Number(e.origPrints) || 0}"` : ''} data-title="ใบเสร็จ ${esc(e.receiptNo || '')}">ใบเสร็จ</button>` : ''}
             ${e.source === 'manual' ? `<button type="button" class="small ghost" data-editent="${esc(e.id)}">แก้ไข</button>
             <button type="button" class="small ghost" data-delent="${esc(e.id)}">ลบ</button>` : ''}
           </div>
