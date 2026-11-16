@@ -71,7 +71,8 @@ function apiGenerateContract(token, tenancyId) {
     waterRate: s.waterRate, electricRate: s.electricRate,
   };
   const r = renderTemplate_(s.contractTemplateId, s.pdfFolderId,
-    'สัญญาเช่า ' + t.roomId + ' ' + tenant.name, map, t.roomId, function (body) { stampOwnerSign_(body, s); }, true);
+    'สัญญาเช่า ' + t.roomId + ' ' + tenant.name, map, t.roomId,
+    function (body) { stampOwnerSign_(body, s); attachIdCard_(body, t, tenant); }, true);
   // ผูกไฟล์สัญญากับการเข้าพักครั้งนี้ (ผู้เช่าคนถัดไปของห้องเดียวกันเปิดไม่ได้)
   DriveApp.getFileById(r.pdfId).setDescription('room:' + t.roomId + '|tenancy:' + tenancyId);
   fsUpdate_(COL.TENANCIES, tenancyId, {
@@ -117,6 +118,52 @@ function stampOwnerSign_(body, s) {
     n++;
   }
   return n;
+}
+
+/** แนบรูปบัตรประชาชนผู้เช่าเป็นหน้าสุดท้ายของสัญญา พร้อมช่องรับรองสำเนา */
+function attachIdCard_(body, t, tenant) {
+  if (!t.idCardFileId) return;
+  let blob;
+  try { blob = DriveApp.getFileById(t.idCardFileId).getBlob(); } catch (e) { return; }
+  const C = DocumentApp.HorizontalAlignment.CENTER;
+  const para = function (text, size, bold) {
+    const p = body.appendParagraph(text).setAlignment(C);
+    if (text) p.editAsText().setFontFamily('Sarabun').setFontSize(size || 12).setBold(!!bold);
+    return p;
+  };
+  body.appendPageBreak();
+  para('สำเนาบัตรประจำตัวประชาชนผู้เช่า', 14, true);
+  para('ประกอบสัญญาเช่าห้อง ' + t.roomId, 12, false);
+  const img = para('', 12).appendInlineImage(blob);
+  const w = img.getWidth(), h = img.getHeight();
+  let nw = Math.min(360, w), nh = h * nw / w;
+  if (nh > 460) { nh = 460; nw = w * nh / h; }
+  img.setWidth(Math.round(nw)).setHeight(Math.round(nh));
+  para('ใช้ประกอบสัญญาเช่าห้อง ' + t.roomId + ' เท่านั้น · รับรองสำเนาถูกต้อง', 12, false);
+  para('', 12);
+  para('ลงชื่อ ........................................ ผู้เช่า', 12, false);
+  para('(' + (tenant.name || t.tenantName || '') + ')', 12, false);
+}
+
+/** อัปโหลดรูปบัตรประชาชนผู้เช่า ผูกกับการเข้าพักครั้งนั้น (ใช้แนบท้ายสัญญา) */
+function apiUploadIdCard(token, tenancyId, upload) {
+  const me = requireSession_(token, 'admin');
+  const t = fsGet_(COL.TENANCIES, tenancyId);
+  if (!t) throw new Error('ไม่พบข้อมูลการเข้าพัก');
+  if (!upload || !/^image\//.test(upload.mimeType || '')) throw new Error('กรุณาเลือกไฟล์รูปภาพ');
+  const id = saveUpload_(idFolder_(), upload, t.roomId, 'idcard', { tenancyId: tenancyId, maxMB: 8 });
+  fsUpdate_(COL.TENANCIES, tenancyId, { idCardFileId: id, idCardUploadedAt: new Date().toISOString() });
+  audit_(me, t.idCardFileId ? 'เปลี่ยนรูปบัตรประชาชน' : 'อัปโหลดรูปบัตรประชาชน', 'ห้อง ' + t.roomId + ' · ' + (t.tenantName || ''), '');
+  return id;
+}
+
+function idFolder_() {
+  const s = getSettings_();
+  if (s.idFolderId) return s.idFolderId;
+  const id = DriveApp.getFolderById(s.rootFolderId).createFolder('บัตรประชาชนผู้เช่า').getId();
+  fsUpdate_(COL.SETTINGS, 'main', { idFolderId: id });
+  clearSettingsCache_();
+  return id;
 }
 
 /** ลายเซ็นผู้ให้เช่า (ใช้ในสัญญาเช่า) : {data, w, h} หรือ null */

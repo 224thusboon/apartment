@@ -51,6 +51,51 @@ function apiReviewPayment(token, paymentId, approve, note) {
   return true;
 }
 
+/**
+ * แอดมินบันทึกรับชำระเอง (เงินสด / โอนที่ไม่ได้ส่งสลิปในแอป)
+ * บังคับแนบรูปหลักฐาน แล้วออกใบเสร็จทันที
+ * data: {method:'cash'|'transfer', paidAt, amount, note} ; upload: {name, mimeType, data}
+ */
+function apiRecordPayment(token, invoiceId, data, upload) {
+  const me = requireSession_(token, 'admin');
+  data = data || {};
+  const inv = fsGet_(COL.INVOICES, invoiceId);
+  if (!inv || inv.status === 'cancelled') throw new Error('ไม่พบใบแจ้งหนี้');
+  if (inv.status === 'paid') throw new Error('บิลนี้ชำระแล้ว');
+  if (!upload || !upload.data) throw new Error('กรุณาแนบรูปหลักฐานการรับเงิน');
+  const method = data.method === 'transfer' ? 'transfer' : 'cash';
+  const paidAt = /^\d{4}-\d{2}-\d{2}$/.test(data.paidAt || '') ? data.paidAt : today_();
+  const s = getSettings_();
+  const fileId = saveUpload_(s.slipFolderId, upload, inv.roomId, (method === 'cash' ? 'cash_' : 'slip_') + inv.month, { tenancyId: inv.tenancyId });
+  const now = new Date().toISOString();
+  const p = fsSet_(COL.PAYMENTS, null, {
+    invoiceId: invoiceId, roomId: inv.roomId, month: inv.month, amount: Number(data.amount) || inv.total,
+    fileId: fileId, method: method, uploadedAt: now, status: 'approved', note: data.note || '',
+    recordedBy: 'admin', reviewedBy: me.email || me.name || '', reviewedAt: now,
+  });
+  // สลิปที่ผู้เช่าส่งมาและยังรอตรวจ ไม่ต้องตรวจซ้ำ
+  fsWhere_(COL.PAYMENTS, { invoiceId: invoiceId, status: 'pending' }).forEach(function (x) {
+    fsUpdate_(COL.PAYMENTS, x.id, { status: 'rejected', note: 'แอดมินบันทึกรับชำระแทนแล้ว' });
+  });
+  fsUpdate_(COL.INVOICES, invoiceId, { status: 'paid', paidAt: paidAt, payMethod: method, payFileId: fileId });
+  const rc = issueReceipt_(invoiceId, paidAt, p.id, me);
+  if (rc) fsUpdate_(COL.PAYMENTS, p.id, { receiptId: rc.id, receiptNo: rc.number });
+  audit_(me, 'บันทึกรับชำระ', 'ห้อง ' + inv.roomId + ' บิล ' + inv.month,
+    (method === 'cash' ? 'เงินสด ' : 'โอน ') + money_(p.amount) + ' บาท' + (rc ? ' · ออกใบเสร็จ ' + rc.number : ''));
+  const after = fsGet_(COL.INVOICES, invoiceId) || {};
+  return { receiptNo: after.receiptNo || '', receiptPdfId: after.receiptPdfId || '' };
+}
+
+/** ออกใบเสร็จให้บิลที่ชำระแล้วแต่ยังไม่มีใบเสร็จ */
+function apiIssueReceipt(token, invoiceId) {
+  const me = requireSession_(token, 'admin');
+  const inv = fsGet_(COL.INVOICES, invoiceId);
+  if (!inv || inv.status !== 'paid') throw new Error('ออกใบเสร็จได้เฉพาะบิลที่ชำระแล้ว');
+  const rc = issueReceipt_(invoiceId, inv.paidAt || today_(), '', me);
+  audit_(me, 'ออกใบเสร็จ', 'ห้อง ' + inv.roomId + ' บิล ' + inv.month, rc ? rc.number : '');
+  return fsGet_(COL.INVOICES, invoiceId);
+}
+
 // ---------- ใบเสร็จรับเงิน ----------
 
 /**

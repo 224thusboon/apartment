@@ -10,7 +10,7 @@
 
 const LEDGER_CATEGORIES = {
   income: ['เงินประกัน', 'ค่าปรับ', 'รายรับอื่น ๆ'],
-  expense: ['ค่าไฟฟ้า (หลวง)', 'ค่าน้ำประปา (หลวง)', 'ค่าซ่อม/อะไหล่', 'ค่าจ้าง/เงินเดือน',
+  expense: ['ค่าไฟฟ้า (หลวง)', 'ค่าน้ำประปา (หลวง)', 'ค่ากำจัดขยะมูลฝอย', 'ค่าซ่อม/อะไหล่', 'ค่าจ้าง/เงินเดือน',
     'ค่าทำความสะอาด', 'คืนเงินประกัน', 'ภาษี/ค่าธรรมเนียม', 'รายจ่ายอื่น ๆ'],
 };
 
@@ -35,7 +35,7 @@ function allEntries_(invoices, repairs, ledger) {
     rows.push({
       id: 'rep_' + r.id, source: 'repair', type: 'expense', date: r.date, month: String(r.date).slice(0, 7),
       category: 'ค่าซ่อม/อะไหล่', amount: cost,
-      note: 'ห้อง ' + r.roomId + ' · ' + (r.title || '') + (r.parts ? ' (' + r.parts + ')' : ''),
+      note: (r.roomId === 'common' ? 'ส่วนกลาง' : 'ห้อง ' + r.roomId) + ' · ' + (r.title || '') + (r.parts ? ' (' + r.parts + ')' : ''),
     });
   });
   ledger.forEach(function (e) {

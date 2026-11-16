@@ -30,7 +30,7 @@ function apiSaveRepair(token, repair, photos) {
 
   // เรียกเก็บจากผู้เช่า -> รายการเรียกเก็บเพิ่ม เข้าบิลเดือนที่เลือก
   const chargeAmt = Number(repair.chargeAmount) || 0;
-  if (repair.chargeTenant && chargeAmt > 0 && !saved.chargeId) {
+  if (repair.roomId !== 'common' && repair.chargeTenant && chargeAmt > 0 && !saved.chargeId) {
     const c = apiAddCharge(token, {
       roomId: repair.roomId, month: repair.chargeMonth || date.slice(0, 7),
       name: 'ค่าซ่อม ' + (repair.title || ''), qty: 1, price: chargeAmt, note: repair.parts || '', repairId: saved.id,
@@ -39,7 +39,7 @@ function apiSaveRepair(token, repair, photos) {
     saved.chargeId = c.id;
   }
   // ค่าใช้จ่ายงานซ่อมเข้าบัญชีรายจ่ายอัตโนมัติ (ดู Accounts.gs) ไม่ต้องบันทึกซ้ำ
-  audit_(me, old ? 'แก้ไขงานซ่อม' : 'บันทึกงานซ่อม', 'ห้อง ' + repair.roomId + ' · ' + (repair.title || ''),
+  audit_(me, old ? 'แก้ไขงานซ่อม' : 'บันทึกงานซ่อม', (repair.roomId === 'common' ? 'ส่วนกลาง' : 'ห้อง ' + repair.roomId) + ' · ' + (repair.title || ''),
     'ค่าใช้จ่าย ' + money_(cost) + (old && Number(old.cost) !== cost ? ' (เดิม ' + money_(old.cost) + ')' : '') + ' · สถานะ ' + saved.status);
   return saved;
 }

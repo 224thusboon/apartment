@@ -342,6 +342,48 @@
     return res;
   }
 
+  // แปลง PDF เป็นรูป JPEG ไฟล์เดียว (หลายหน้าต่อกันแนวตั้ง) แล้วบันทึกลงเครื่อง
+  async function pdfToJpeg(bytes, name) {
+    const lib = await loadPdfJs();
+    const pdf = await lib.getDocument({ data: bytes, cMapUrl: PDFJS + 'cmaps/', cMapPacked: true }).promise;
+    const pages = [];
+    for (let n = 1; n <= pdf.numPages; n++) {
+      const page = await pdf.getPage(n);
+      pages.push({ page, vp1: page.getViewport({ scale: 1 }) });
+    }
+    const GAP = 12;
+    const totalH = pages.reduce((s, p) => s + p.vp1.height, 0);
+    const scale = Math.min(2.5, (16000 - GAP * pages.length) / totalH);
+    const c = document.createElement('canvas');
+    c.width = Math.floor(Math.max(...pages.map((p) => p.vp1.width)) * scale);
+    c.height = Math.floor(totalH * scale) + GAP * (pages.length - 1);
+    const cx = c.getContext('2d');
+    cx.fillStyle = '#d0d0d0';
+    cx.fillRect(0, 0, c.width, c.height);
+    let y = 0;
+    for (const p of pages) {
+      const vp = p.page.getViewport({ scale });
+      const pc = document.createElement('canvas');
+      pc.width = Math.floor(vp.width);
+      pc.height = Math.floor(vp.height);
+      const pcx = pc.getContext('2d');
+      pcx.fillStyle = '#fff';
+      pcx.fillRect(0, 0, pc.width, pc.height);
+      await p.page.render({ canvasContext: pcx, viewport: vp }).promise;
+      cx.drawImage(pc, 0, y);
+      y += pc.height + GAP;
+    }
+    const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.9));
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = String(name || 'เอกสาร').replace(/\.pdf$/i, '') + '.jpg';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  }
+
   async function viewFile(fileId, title, src, preload) {
     const rcId = src && src.dataset.receipt;
     const asAdminReceipt = rcId && state.role === 'admin';
@@ -359,7 +401,16 @@
         <p class="row">${asAdminReceipt ? `<button type="button" class="btn" id="btnOrig">${ic('print')} พิมพ์ต้นฉบับ</button>
           <button type="button" class="btn ghost" id="btnCopy">${ic('print')} พิมพ์สำเนา</button>`
           : isImg || isPdf ? `<button type="button" class="btn" id="btnPrint">${ic('print')} พิมพ์</button>` : ''}
-        <a class="btn ghost" href="${url}" download="${esc(f.name)}">ดาวน์โหลด ${esc(f.name)}</a></p>`;
+        ${isPdf ? `<button type="button" class="btn ghost" id="btnJpg">ดาวน์โหลด JPEG</button>` : ''}
+        <a class="btn ghost" href="${url}" download="${esc(f.name)}">ดาวน์โหลด ${isPdf ? 'PDF' : esc(f.name)}</a></p>`;
+      const jb = $('#btnJpg', body);
+      if (jb) jb.onclick = async () => {
+        jb.disabled = true;
+        const old = jb.innerHTML;
+        jb.textContent = 'กำลังแปลงเป็น JPEG…';
+        try { await pdfToJpeg(bytes.slice(), f.name); } catch (err) { toast('แปลงไม่ได้: ' + err.message, true); }
+        jb.disabled = false; jb.innerHTML = old;
+      };
       if (asAdminReceipt) {
         const info = () => {
           const n = Number(src.dataset.orig) || 0;
@@ -650,6 +701,14 @@
             <button type="button" class="small danger" id="btnOut">ย้ายออก</button>
           </div>
           <div class="signed">
+            <div class="row spread"><strong>รูปบัตรประชาชน</strong>
+              <label class="btn small${cur.idCardFileId ? ' ghost' : ''}" style="margin:0;cursor:pointer">${ic('upload')} ${cur.idCardFileId ? 'เปลี่ยนรูป' : 'อัปโหลด'}
+                <input type="file" id="idFile" accept="image/\x2a" hidden></label></div>
+            ${cur.idCardFileId ? `<div class="thumbs"><button type="button" class="small ghost" data-file="${esc(cur.idCardFileId)}" data-title="บัตรประชาชน ${esc(cur.tenantName)}">${ic('file')} ดูรูปบัตร</button></div>
+              <div class="muted" style="font-size:13px">แนบไว้ท้ายสัญญาเช่าที่สร้าง</div>`
+              : '<div class="muted" style="font-size:14px">ต้องอัปโหลดก่อนสร้างสัญญา ระบบจะแนบรูปบัตรไว้ท้ายสัญญา</div>'}
+          </div>
+          <div class="signed">
             <div class="row spread"><strong>สัญญาที่เซ็นแล้ว</strong>
               <label class="btn small" style="margin:0;cursor:pointer">${ic('upload')} อัปโหลด
                 <input type="file" id="signedFile" accept="image/\x2a,application/pdf" multiple hidden></label></div>
@@ -772,7 +831,24 @@
           <button type="button" class="ghost" id="backRoom">กลับไปที่ห้อง</button></p>`);
         $('#backRoom').onclick = () => openRoom(roomId);
       };
-      $('#btnContract', body).onclick = (e) => busy(e.target, async () => contractDone(await api('apiGenerateContract', cur.id)));
+      const needId = () => { toast('อัปโหลดรูปบัตรประชาชนก่อนสร้างสัญญา', true); $('#idFile', body).click(); };
+      $('#btnContract', body).onclick = (e) => {
+        if (!cur.idCardFileId) { needId(); return; }
+        busy(e.target, async () => contractDone(await api('apiGenerateContract', cur.id)));
+      };
+      $('#idFile', body).onchange = async (e) => {
+        const input = e.target;
+        if (!input.files.length) return;
+        const lbl = input.closest('label');
+        lbl.classList.add('disabled');
+        toast('กำลังอัปโหลด…');
+        try {
+          const files = await readFiles(input, 1600);
+          await api('apiUploadIdCard', cur.id, files[0]);
+          toast('บันทึกรูปบัตรประชาชนแล้ว');
+          openRoom(roomId);
+        } catch (err) { fail(err); lbl.classList.remove('disabled'); }
+      };
       // แก้ชื่อ/ข้อมูลผู้เช่า แล้วสร้างสัญญาใหม่ด้วยข้อมูลที่แก้ (เลือกได้)
       $('#btnEditTenant', body).onclick = (e) => busy(e.target, async () => {
         const tn = (await api('apiGetTenant', cur.tenantId)) || {};
@@ -803,8 +879,8 @@
           busy($('button[type=submit]', ev.target), async () => {
             await api('apiUpdateTenant', cur.id, f);
             if (state.tab === 'rooms') adminRooms();
-            if (f.newContract) contractDone(await api('apiGenerateContract', cur.id));
-            else { toast('บันทึกแล้ว'); openRoom(roomId); }
+            if (f.newContract && cur.idCardFileId) contractDone(await api('apiGenerateContract', cur.id));
+            else { toast(f.newContract ? 'บันทึกแล้ว · อัปโหลดรูปบัตรประชาชนก่อนสร้างสัญญา' : 'บันทึกแล้ว', !!f.newContract); openRoom(roomId); }
           });
         };
       });
@@ -943,7 +1019,7 @@
       ${(() => { const fees = ((state.admin && state.admin.settings && state.admin.settings.otherFees) || []); return fees.length ? `<p style="font-size:14px;margin-top:-4px">ทุกห้องที่มีผู้เช่าคิดเพิ่ม: ${fees.map((f) => `<strong>${esc(f.name)} ${fmt(f.amount)}</strong>`).join(' · ')} บาท <span class="muted">(แก้ที่หน้าตั้งค่า)</span></p>` : ''; })()}
       ${rows.length ? `<div class="meter" id="meter">
         <div class="mrow mhead" aria-hidden="true">
-          <span>ห้อง</span><span>${ic('drop')} มิเตอร์น้ำ</span><span>${ic('bolt')} มิเตอร์ไฟ</span><span>รายการเพิ่ม</span><span>บิลเดือนนี้</span>
+          <span>ห้อง</span><span>${ic('bolt')} มิเตอร์ไฟ</span><span>${ic('drop')} มิเตอร์น้ำ</span><span>รายการเพิ่ม</span><span>บิลเดือนนี้</span>
         </div>
         ${rows.map((r) => {
           const st = r.invoiceStatus && r.invoiceStatus !== 'cancelled' ? r.invoiceStatus : '';
@@ -967,8 +1043,8 @@
               <span class="mno">${esc(r.roomId)}</span>
               <span class="mname" title="${esc(r.tenantName)}">${withNick(r.tenantName, r.tenantNick)}</span>
             </div>
-            ${meterCell('water', 'น้ำ', 'drop', r.prevWater, r.prevWaterText, r.waterText)}
             ${meterCell('electric', 'ไฟ', 'bolt', r.prevElectric, r.prevElectricText, r.electricText)}
+            ${meterCell('water', 'น้ำ', 'drop', r.prevWater, r.prevWaterText, r.waterText)}
             <div class="mcharges"><span class="mlab">รายการเพิ่ม</span>${chargeCell(r.roomId)}</div>
             <div class="mbill">
               ${st ? pill(st) : '<span class="muted" style="font-size:13px">ยังไม่ออกบิล</span>'}
@@ -989,7 +1065,7 @@
           <div class="row spread">
             <div class="grow"><strong>ห้อง ${esc(i.roomId)}</strong> ${esc(i.tenantName)}
               <div class="muted">เลขที่ ${esc(i.number || '-')} · ${fmt(i.total)} บาท · ครบกำหนด ${thDate(i.dueDate)}</div>
-              ${i.receiptNo ? `<div class="muted" style="font-size:13px">ใบเสร็จ ${esc(i.receiptNo)} · ยืนยันการโอน ${thDate(i.paidAt)}</div>` : ''}</div>
+              ${i.receiptNo ? `<div class="muted" style="font-size:13px">ใบเสร็จ ${esc(i.receiptNo)} · ${i.payMethod === 'cash' ? 'รับเงินสด' : 'ยืนยันการโอน'} ${thDate(i.paidAt)}</div>` : ''}</div>
             <select data-inv="${esc(i.id)}" style="width:auto">
               ${['unpaid', 'pending', 'paid'].map((s) => `<option value="${s}" ${i.status === s ? 'selected' : ''}>${STATUS[s]}</option>`).join('')}
             </select>
@@ -997,6 +1073,8 @@
           <div class="row" style="margin-top:6px">
             ${i.pdfFileId ? `<button type="button" class="small ghost" data-file="${esc(i.pdfFileId)}" data-title="ใบแจ้งหนี้ ${esc(i.number || i.roomId)}">ใบแจ้งหนี้</button>` : ''}
             ${i.receiptPdfId ? `<button type="button" class="small ghost" data-file="${esc(i.receiptPdfId)}" data-receipt="${esc(i.id)}" data-orig="${Number(i.receiptOrigPrints) || 0}" data-title="ใบเสร็จ ${esc(i.receiptNo || '')}">ใบเสร็จ${i.receiptOrigPrints ? '' : ' (ยังไม่พิมพ์ต้นฉบับ)'}</button>` : ''}
+            ${i.status === 'paid' && !i.receiptPdfId ? `<button type="button" class="small" data-issuerc="${esc(i.id)}">${ic('bill')} ออกใบเสร็จ</button>` : ''}
+            ${i.payFileId ? `<button type="button" class="small ghost" data-file="${esc(i.payFileId)}" data-title="หลักฐานการรับชำระ ห้อง ${esc(i.roomId)}">หลักฐานชำระ</button>` : ''}
             ${i.status !== 'paid' ? `<button type="button" class="small ghost" data-editinv="${esc(i.id)}">แก้ไข</button>
             <button type="button" class="small ghost" data-cancelinv="${esc(i.id)}" style="color:var(--bad);border-color:var(--bad)">ยกเลิกใบนี้</button>` : ''}
             <button type="button" class="small ghost" data-rerender="${esc(i.id)}" title="สร้าง PDF ใหม่ด้วยรูปแบบปัจจุบันและลายเซ็นของคุณ">ทำ PDF ใหม่</button>
@@ -1029,10 +1107,12 @@
       u = Math.round(u * 100) / 100;
       if (u < 0) { cell.classList.add('bad'); out.textContent = ch ? 'เลขไม่สัมพันธ์กับข้อมูลการเปลี่ยนมิเตอร์' : 'น้อยกว่าเลขเดือนก่อน ถ้าเปลี่ยนมิเตอร์ กดปุ่มด้านล่าง'; return; }
       const water = cell.dataset.kind === 'water';
+      const why = ch && ch.type === 'replace'
+        ? ` (ตัวเก่า ${cell.dataset.prevtext}→${ch.oldFinalText || ch.oldFinal} + ตัวใหม่ ${ch.newStartText || ch.newStart}→${v})` : '';
       const rate = Number(water ? st.waterRate : st.electricRate) || 0;
       const min = Number(water ? st.waterMinCharge : st.electricMinCharge) || 0;
       const amt = Math.max(u * rate, min);
-      out.textContent = `ใช้ ${fmt(u)} หน่วย` + (rate ? ` · ${fmt(amt)} บาท` : '');
+      out.textContent = `ใช้ ${fmt(u)} หน่วย` + (rate ? ` · ${fmt(amt)} บาท` : '') + why;
     };
     $$('#meter .mcell').forEach((cell) => { usage(cell); $('input', cell).addEventListener('input', () => usage(cell)); });
     // แก้เลขเดือนก่อน (ถ้าเพิ่งย้ายเข้า = มิเตอร์ตั้งต้นของผู้เช่า)
@@ -1087,8 +1167,18 @@
     };
     $$('[data-inv]').forEach((sel) => {
       sel.onchange = async () => {
+        const inv = active.find((x) => x.id === sel.dataset.inv);
+        // เปลี่ยนเป็นชำระแล้ว: ต้องแนบหลักฐานและออกใบเสร็จ
+        if (sel.value === 'paid') { sel.value = inv.status; payForm(inv, month); return; }
         try { await api('apiSetInvoiceStatus', sel.dataset.inv, sel.value); toast('อัปเดตสถานะแล้ว'); adminBilling(month); } catch (e) { fail(e); }
       };
+    });
+    $$('[data-issuerc]').forEach((b) => {
+      b.onclick = () => busy(b, async () => {
+        const inv = await api('apiIssueReceipt', b.dataset.issuerc);
+        toast('ออกใบเสร็จ ' + (inv.receiptNo || '') + ' แล้ว');
+        adminBilling(month);
+      });
     });
     $$('[data-addcharge]').forEach((b) => { b.onclick = () => chargeForm({ month, roomId: b.dataset.addcharge }); });
     $$('[data-delcharge]').forEach((b) => {
@@ -1209,6 +1299,41 @@
           saveB64(r);
           toast('ส่งออกแล้ว: ' + r.name);
         }
+      });
+    };
+  }
+
+  // บันทึกรับชำระโดยแอดมิน (เงินสด/โอนนอกแอป): ต้องแนบรูปหลักฐาน แล้วออกใบเสร็จทันที
+  function payForm(inv, month) {
+    const b = openModal(`รับชำระ ห้อง ${inv.roomId}`, `
+      <form id="payForm">
+        <p class="muted" style="margin-top:0">ใบแจ้งหนี้ ${esc(inv.number || '-')} · ${esc(inv.tenantName || '')} · ยอด <strong>${fmt(inv.total)}</strong> บาท</p>
+        <div class="grid2">
+          <div><label>วิธีชำระ</label><select name="method"><option value="cash">เงินสด</option><option value="transfer">โอน (ไม่ได้ส่งสลิปในแอป)</option></select></div>
+          <div><label>วันที่รับเงิน</label><input name="paidAt" type="date" value="${today()}" required></div>
+          <div><label>จำนวนเงิน (บาท)</label><input name="amount" type="number" step="any" value="${esc(inv.total)}" required></div>
+        </div>
+        <label>รูปหลักฐาน * <span class="muted" style="font-weight:400">(เช่น ถ่ายรูปเงินสดกับผู้เช่า หรือสลิป)</span></label>
+        <input name="proof" type="file" accept="image/\x2a,application/pdf" required>
+        <label>หมายเหตุ</label><input name="note" placeholder="ไม่บังคับ">
+        <p><button type="submit">บันทึกรับชำระ + ออกใบเสร็จ</button></p>
+      </form>`);
+    $('#payForm', b).onsubmit = (e) => {
+      e.preventDefault();
+      const input = $('[name=proof]', e.target);
+      if (!input.files.length) { toast('กรุณาแนบรูปหลักฐาน', true); return; }
+      const f = formData(e.target);
+      delete f.proof;
+      busy($('button[type=submit]', e.target), async () => {
+        const files = await readFiles(input, 1600);
+        const r = await api('apiRecordPayment', inv.id, f, files[0]);
+        state.cache = {};
+        adminBilling(month);
+        const d = openModal('รับชำระแล้ว', `
+          <p>บันทึกรับชำระห้อง ${esc(inv.roomId)} และออกใบเสร็จเลขที่ <strong>${esc(r.receiptNo || '-')}</strong> แล้ว</p>
+          <p class="row">${r.receiptPdfId ? `<button type="button" data-file="${esc(r.receiptPdfId)}" data-receipt="${esc(inv.id)}" data-orig="0" data-title="ใบเสร็จ ${esc(r.receiptNo || '')}">${ic('print')} ดู / พิมพ์ใบเสร็จ</button>` : ''}
+            <button type="button" class="ghost" id="payDone">ปิด</button></p>`);
+        $('#payDone', d).onclick = closeModal;
       });
     };
   }
@@ -1490,7 +1615,7 @@
     return `<div class="list-item li" ${state.role === 'admin' ? `data-repair="${esc(r.id)}"` : ''}>
       <span class="ic">${ic('wrench')}</span>
       <div class="grow">
-        <div class="row spread"><strong>${state.role === 'admin' && r.roomId ? 'ห้อง ' + esc(r.roomId) + ' · ' : ''}${esc(r.title)}</strong>${pill(r.status)}</div>
+        <div class="row spread"><strong>${state.role === 'admin' && r.roomId ? (r.roomId === 'common' ? 'ส่วนกลาง' : 'ห้อง ' + esc(r.roomId)) + ' · ' : ''}${esc(r.title)}</strong>${pill(r.status)}</div>
         <div class="muted" style="font-size:14px">${thDate(r.date)}${r.parts ? ' · อะไหล่: ' + esc(r.parts) : ''}${r.cost ? ' · ' + fmt(r.cost) + ' ฿' : ''}${r.reportedBy === 'tenant' ? ' · ผู้เช่าแจ้ง' : ''}</div>
       </div>
     </div>`;
@@ -1503,11 +1628,13 @@
   function drawRepairs(onlyOpen, rows) {
     $('#view').innerHTML = `
       ${sec('งานซ่อม', `<select id="rf" style="width:auto"><option value="1">ยังไม่เสร็จ</option><option value="0">ทั้งหมด</option></select>
+        <button type="button" class="ghost" id="addRC">${ic('plus')} ซ่อมส่วนกลาง</button>
         <button type="button" id="addR">${ic('plus')} เพิ่ม</button>`)}
       <div class="card">${rows.length ? rows.map(repairRow).join('') : '<span class="muted">ไม่มีรายการ</span>'}</div>`;
     $('#rf').value = onlyOpen ? '1' : '0';
     $('#rf').onchange = (e) => adminRepairs(e.target.value === '1').catch(fail);
     $('#addR').onclick = () => repairForm({});
+    $('#addRC').onclick = () => repairForm({ roomId: 'common' });
     $$('[data-repair]').forEach((el) => { el.onclick = () => repairForm(rows.find((x) => x.id === el.dataset.repair)); });
   }
 
@@ -1518,7 +1645,8 @@
       <form id="repForm">
         <div class="grid2">
           <div><label>ห้อง</label>
-            <select name="roomId" required>${rooms.map((x) => `<option value="${esc(x.id)}" ${x.id === r.roomId ? 'selected' : ''}>${esc(x.number)}</option>`).join('')}</select></div>
+            <select name="roomId" required>${rooms.map((x) => `<option value="${esc(x.id)}" ${x.id === r.roomId ? 'selected' : ''}>${esc(x.number)}</option>`).join('')}
+              <option value="common" ${r.roomId === 'common' ? 'selected' : ''}>ส่วนกลาง</option></select></div>
           <div><label>วันที่</label><input name="date" type="date" value="${esc(r.date || today())}"></div>
         </div>
         <label>เรื่อง *</label><input name="title" required value="${esc(r.title)}" placeholder="เช่น แอร์ไม่เย็น, ก๊อกน้ำรั่ว">
@@ -1540,6 +1668,17 @@
         <p><button type="submit">บันทึก</button></p>
       </form>`);
     if ($('#chkCharge', b)) $('#chkCharge', b).onchange = (e) => $('#chargeBox', b).classList.toggle('hidden', !e.target.checked);
+    // ส่วนกลาง: ไม่มีผู้เช่าให้เรียกเก็บ
+    const roomSel = $('[name=roomId]', b);
+    const syncCommon = () => {
+      const lbl = $('#chkCharge', b) && $('#chkCharge', b).closest('label');
+      if (!lbl) return;
+      const common = roomSel.value === 'common';
+      lbl.classList.toggle('hidden', common);
+      if (common) { $('#chkCharge', b).checked = false; $('#chargeBox', b).classList.add('hidden'); }
+    };
+    roomSel.onchange = syncCommon;
+    syncCommon();
     $('#repForm', b).onsubmit = (e) => {
       e.preventDefault();
       const f = formData(e.target);

@@ -191,7 +191,7 @@
   /* ตารางจดมิเตอร์: แถวแบบกริด คอมเป็นแถวเดียว มือถือเป็นการ์ด */
   .meter { display: grid; gap: 10px; margin-bottom: 14px; }
   .mrow { display: grid; gap: 12px 14px; align-items: center; margin: 0; padding: 14px 16px;
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "room bill" "water electric" "charges charges"; }
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "room bill" "electric water" "charges charges"; }
   .mrow.mhead { display: none; }
   .mroom { grid-area: room; display: flex; flex-direction: column; align-items: flex-start; min-width: 0; }
   .mno { font-family: var(--head); font-size: 20px; font-weight: 700; }
@@ -221,13 +221,13 @@
   @media (min-width: 900px) {
     .meter { gap: 0; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); box-shadow: var(--shadow); overflow: hidden; }
     .mrow { grid-template-columns: minmax(150px, 1.1fr) minmax(170px, 1fr) minmax(170px, 1fr) minmax(170px, 1.3fr) 150px;
-      grid-template-areas: "room water electric charges bill"; border: 0; border-radius: 0; box-shadow: none;
+      grid-template-areas: "room electric water charges bill"; border: 0; border-radius: 0; box-shadow: none;
       border-bottom: 1px solid var(--line); background: transparent; }
     .mrow:last-child { border-bottom: 0; }
     .mrow.mhead { display: grid; padding: 10px 16px; background: var(--bg); font-size: 13px; font-weight: 700; color: var(--muted); }
     .mrow.mhead span { display: flex; align-items: center; gap: 4px; }
-    .mrow.mhead span:nth-child(1) { grid-area: room; } .mrow.mhead span:nth-child(2) { grid-area: water; }
-    .mrow.mhead span:nth-child(3) { grid-area: electric; } .mrow.mhead span:nth-child(4) { grid-area: charges; }
+    .mrow.mhead span:nth-child(1) { grid-area: room; } .mrow.mhead span:nth-child(2) { grid-area: electric; }
+    .mrow.mhead span:nth-child(3) { grid-area: water; } .mrow.mhead span:nth-child(4) { grid-area: charges; }
     .mrow.mhead span:nth-child(5) { grid-area: bill; justify-content: flex-end; }
     .mrow.mhead svg.i { width: 15px; height: 15px; }
     .mrow .mlab { display: none; }

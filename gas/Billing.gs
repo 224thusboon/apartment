@@ -345,9 +345,8 @@ function apiSetInvoiceStatus(token, invoiceId, status) {
   const inv = fsGet_(COL.INVOICES, invoiceId);
   if (!inv) throw new Error('ไม่พบใบแจ้งหนี้');
   if (status === 'paid') {
-    const paidAt = inv.status === 'paid' && inv.paidAt ? inv.paidAt : today_();
-    fsUpdate_(COL.INVOICES, invoiceId, { status: 'paid', paidAt: paidAt });
-    issueReceipt_(invoiceId, paidAt, '', me);
+    if (inv.status === 'paid') return true;
+    throw new Error('เปลี่ยนเป็นชำระแล้วต้องแนบหลักฐานการรับเงิน (ใช้หน้ารับชำระ)');
   } else {
     fsUpdate_(COL.INVOICES, invoiceId, { status: status, paidAt: '' });
     if (inv.receiptId) voidReceipt_(invoiceId, 'เปลี่ยนสถานะใบแจ้งหนี้เป็น ' + status);
