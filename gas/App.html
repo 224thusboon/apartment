@@ -940,6 +940,7 @@
       ${state.master ? `<div class="card alert-bad" style="font-size:14px"><strong>เข้าระบบด้วยรหัส master</strong> · ใบแจ้งหนี้และใบเสร็จที่ออกตอนนี้จะไม่มีลายเซ็นและชื่อผู้ออก ควรเข้าด้วยอีเมลของตัวเอง</div>` : ''}
       ${sec(`จดมิเตอร์ ${thMonth(month)}`, `<input type="month" id="mon" value="${month}" style="width:auto">`)}
       <p class="muted" style="font-size:14px;margin-top:-6px">กรอกเลขมิเตอร์สิ้นเดือน หน่วยที่ใช้คิดจากเลขเดือนก่อน · รายการเพิ่ม (เช่น ค่าซ่อม) ของแต่ละห้องจะรวมเข้าบิลห้องนั้นเดือนนี้</p>
+      ${(() => { const fees = ((state.admin && state.admin.settings && state.admin.settings.otherFees) || []); return fees.length ? `<p style="font-size:14px;margin-top:-4px">ทุกห้องที่มีผู้เช่าคิดเพิ่ม: ${fees.map((f) => `<strong>${esc(f.name)} ${fmt(f.amount)}</strong>`).join(' · ')} บาท <span class="muted">(แก้ที่หน้าตั้งค่า)</span></p>` : ''; })()}
       ${rows.length ? `<div class="meter" id="meter">
         <div class="mrow mhead" aria-hidden="true">
           <span>ห้อง</span><span>${ic('drop')} มิเตอร์น้ำ</span><span>${ic('bolt')} มิเตอร์ไฟ</span><span>รายการเพิ่ม</span><span>บิลเดือนนี้</span>
@@ -1213,8 +1214,9 @@
   }
 
   // ลายเซ็นของผู้ดูแล: เซ็นบนจอ หรืออัปโหลดรูป (ตัดพื้นหลังขาวให้เป็นพื้นใส)
-  function signatureForm(after) {
-    const b = openModal('ลายเซ็นของฉัน', `
+  function signatureForm(after, opt) {
+    opt = opt || { title: 'ลายเซ็นของฉัน', get: 'apiGetMySignature', save: 'apiSaveMySignature', delMsg: 'ลบลายเซ็นของคุณ? เอกสารที่ออกหลังจากนี้จะไม่มีลายเซ็น' };
+    const b = openModal(opt.title, `
       <div id="sigCur" class="muted" style="font-size:14px">กำลังโหลดลายเซ็นปัจจุบัน…</div>
       <div class="seg" style="margin-top:12px">
         <button type="button" data-m="draw" class="on">เซ็นบนจอ</button>
@@ -1289,14 +1291,14 @@
     $('#sigSave', b).onclick = (e) => {
       const sig = drawn ? trimmed() : null;
       if (!sig) { toast('กรุณาเซ็นหรืออัปโหลดรูปก่อน', true); return; }
-      busy(e.target, async () => { await api('apiSaveMySignature', sig); toast('บันทึกลายเซ็นแล้ว'); closeModal(); if (after) after(); });
+      busy(e.target, async () => { await api(opt.save, sig); toast('บันทึกลายเซ็นแล้ว'); closeModal(); if (after) after(); });
     };
     $('#sigDel', b).onclick = async (e) => {
       const btn = e.target;
-      if (!(await ask('ลบลายเซ็นของคุณ? เอกสารที่ออกหลังจากนี้จะไม่มีลายเซ็น', { ok: 'ลบ', danger: true }))) return;
-      busy(btn, async () => { await api('apiSaveMySignature', null); toast('ลบแล้ว'); closeModal(); if (after) after(); });
+      if (!(await ask(opt.delMsg, { ok: 'ลบ', danger: true }))) return;
+      busy(btn, async () => { await api(opt.save, null); toast('ลบแล้ว'); closeModal(); if (after) after(); });
     };
-    api('apiGetMySignature').then((s) => {
+    api(opt.get).then((s) => {
       const box = $('#sigCur', b);
       if (!box) return;
       if (s) {
@@ -1676,6 +1678,9 @@
             <div><label>ชื่อผู้ให้เช่า (ในสัญญา)</label><input name="ownerName" value="${esc(s.ownerName)}"></div>
             <div><label>เบอร์โทร</label><input name="phone" value="${esc(s.phone)}"></div>
           </div>
+          <label>ลายเซ็นผู้ให้เช่า (ในสัญญาเช่า)</label>
+          <p class="row" style="margin:0"><button type="button" class="ghost small" id="ownerSig">${s.ownerSignatureFileId ? 'เปลี่ยนลายเซ็นผู้ให้เช่า' : 'ตั้งลายเซ็นผู้ให้เช่า'}</button>
+            <span class="muted" style="font-size:13px">${s.ownerSignatureFileId ? 'ตั้งแล้ว ใส่ในสัญญาที่สร้างใหม่' : 'ยังไม่ได้ตั้ง สัญญาจะเว้นเส้นจุดไว้เซ็นมือ'}</span></p>
           <label>ข้อมูลบัญชีรับโอน</label><textarea name="bankInfo">${esc(s.bankInfo)}</textarea>
           <label>สีหลัก</label><input name="primaryColor" type="color" value="${esc(s.primaryColor)}" style="height:44px">
         </div>
@@ -1724,6 +1729,9 @@
       </div>
       <div id="sysArea"><div class="center muted">กำลังโหลดข้อมูลระบบ…</div></div>`;
     loadSystemPanel();
+    $('#ownerSig').onclick = () => signatureForm(() => adminSettings(), {
+      title: 'ลายเซ็นผู้ให้เช่า', get: 'apiGetOwnerSignature', save: 'apiSaveOwnerSignature',
+      delMsg: 'ลบลายเซ็นผู้ให้เช่า? สัญญาที่สร้างหลังจากนี้จะเว้นเส้นจุดไว้เซ็นมือ' });
     // อัปโหลดสัญญาต้นแบบ .docx -> แปลงเป็น Google Docs และใส่ตัวแทน {{...}} ให้อัตโนมัติ
     $('#ctFile').onchange = async (e) => {
       const file = e.target.files[0];
@@ -1760,15 +1768,30 @@
     $('#setForm').onsubmit = (e) => {
       e.preventDefault();
       const f = formData(e.target);
-      f.otherFees = String(f.otherFees || '').split('\n').map((l) => {
-        const i = l.lastIndexOf('=');
-        return i > 0 ? { name: l.slice(0, i).trim(), amount: Number(l.slice(i + 1)) || 0 } : null;
+      // รับได้ทั้ง "ค่าขยะ=30", "ค่าขยะ 30", "ค่าขยะ: 30 บาท"
+      const bad = [];
+      f.otherFees = String(f.otherFees || '').split('\n').map((l) => l.trim()).filter(Boolean).map((l) => {
+        const m = l.match(/^(.*?)[\s=:]*([0-9][0-9,]*(?:\.[0-9]+)?)\s*(?:บาท)?$/);
+        if (!m || !m[1].trim()) { bad.push(l); return null; }
+        return { name: m[1].trim(), amount: Number(m[2].replace(/,/g, '')) };
       }).filter(Boolean);
+      if (bad.length) { toast('อ่านจำนวนเงินไม่ได้: ' + bad.join(', ') + ' (ใส่แบบ ชื่อ=จำนวนเงิน)', true); return; }
       busy($('button[type=submit]', e.target), async () => {
         const ns = await api('apiSaveSettings', f);
         document.documentElement.style.setProperty('--accent', ns.primaryColor);
         $('#title').textContent = ns.dormName;
+        if (state.admin) state.admin.settings = ns;
         toast('บันทึกแล้ว');
+        const list = ns.unpaidToReissue || [];
+        const n = list.reduce((s, x) => s + x.roomIds.length, 0);
+        if (n && await ask(`ค่าใช้จ่ายอื่นเปลี่ยนแล้ว มีใบแจ้งหนี้ที่ยังไม่ชำระ ${n} ใบ (${list.map((x) => thMonth(x.month)).join(', ')})\nออกใบเหล่านี้ใหม่ให้รวมค่าใหม่ไหม? เลขที่เอกสารเดิม`, { ok: 'ออกใหม่' })) {
+          let ok = 0; const errs = [];
+          for (const x of list) {
+            const res = await api('apiGenerateInvoices', x.month, x.roomIds);
+            res.forEach((r) => { if (r.ok) ok++; else errs.push(`ห้อง ${r.roomId}: ${r.error}`); });
+          }
+          toast(`ออกใหม่แล้ว ${ok} ใบ` + (errs.length ? ' · ไม่สำเร็จ ' + errs.join(', ') : ''), !!errs.length);
+        }
       });
     };
   }

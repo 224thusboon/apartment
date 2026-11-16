@@ -71,7 +71,7 @@ function apiGenerateContract(token, tenancyId) {
     waterRate: s.waterRate, electricRate: s.electricRate,
   };
   const r = renderTemplate_(s.contractTemplateId, s.pdfFolderId,
-    'สัญญาเช่า ' + t.roomId + ' ' + tenant.name, map, t.roomId, null, true);
+    'สัญญาเช่า ' + t.roomId + ' ' + tenant.name, map, t.roomId, function (body) { stampOwnerSign_(body, s); }, true);
   // ผูกไฟล์สัญญากับการเข้าพักครั้งนี้ (ผู้เช่าคนถัดไปของห้องเดียวกันเปิดไม่ได้)
   DriveApp.getFileById(r.pdfId).setDescription('room:' + t.roomId + '|tenancy:' + tenancyId);
   fsUpdate_(COL.TENANCIES, tenancyId, {
@@ -80,6 +80,75 @@ function apiGenerateContract(token, tenancyId) {
   });
   audit_(me, 'สร้างสัญญาเช่า', 'ห้อง ' + t.roomId, tenant.name || '');
   return { pdfId: r.pdfId, docUrl: 'https://docs.google.com/document/d/' + r.docId + '/edit' };
+}
+
+/**
+ * วางลายเซ็นผู้ให้เช่าแทนเส้นจุดในบรรทัด "ลงชื่อ....... ผู้ให้เช่า" (ทุกจุดที่พบ)
+ * ไม่มีลายเซ็นในการตั้งค่า = ปล่อยเส้นจุดไว้ให้เซ็นมือ
+ */
+function stampOwnerSign_(body, s) {
+  if (!s.ownerSignatureFileId) return 0;
+  let blob;
+  try { blob = DriveApp.getFileById(s.ownerSignatureFileId).getBlob(); } catch (e) { return 0; }
+  const ratio = (Number(s.ownerSignatureW) || 3) / (Number(s.ownerSignatureH) || 1);
+  let h = 34, w = h * ratio;
+  if (w > 150) { w = 150; h = w / ratio; }
+  const PAT = 'ลงชื่อ\\s*[\\.…_]{3,}\\s*ผู้ให้เช่า';
+  let n = 0, f;
+  while (n < 5 && (f = body.findText(PAT))) {
+    const el = f.getElement().asText();
+    const full = el.getText();
+    const seg = full.slice(f.getStartOffset(), f.getEndOffsetInclusive() + 1);
+    const m = seg.match(/[\.…_]{3,}/);
+    const s0 = f.getStartOffset() + m.index, e0 = s0 + m[0].length - 1;
+    const tail = full.slice(e0 + 1);
+    const fmt = { font: el.getFontFamily(s0), size: el.getFontSize(s0), bold: el.isBold(s0), color: el.getForegroundColor(s0) };
+    el.deleteText(s0, full.length - 1);
+    const par = el.getParent();
+    const idx = par.getChildIndex(el);
+    par.insertInlineImage(idx + 1, blob.copyBlob()).setWidth(Math.round(w)).setHeight(Math.round(h));
+    if (tail) {
+      const tt = par.insertText(idx + 2, tail);
+      if (fmt.font) tt.setFontFamily(fmt.font);
+      if (fmt.size) tt.setFontSize(fmt.size);
+      if (fmt.bold != null) tt.setBold(!!fmt.bold);
+      if (fmt.color) tt.setForegroundColor(fmt.color);
+    }
+    n++;
+  }
+  return n;
+}
+
+/** ลายเซ็นผู้ให้เช่า (ใช้ในสัญญาเช่า) : {data, w, h} หรือ null */
+function apiGetOwnerSignature(token) {
+  requireSession_(token, 'admin');
+  const s = getSettings_();
+  if (!s.ownerSignatureFileId) return null;
+  try {
+    const b = DriveApp.getFileById(s.ownerSignatureFileId).getBlob();
+    return { data: Utilities.base64Encode(b.getBytes()), w: s.ownerSignatureW || 0, h: s.ownerSignatureH || 0 };
+  } catch (e) { return null; }
+}
+
+/** บันทึกลายเซ็นผู้ให้เช่า (PNG พื้นใส) sig: {data, w, h} ; null = ลบ */
+function apiSaveOwnerSignature(token, sig) {
+  const me = requireSession_(token, 'admin');
+  const s = getSettings_();
+  if (s.ownerSignatureFileId) { try { DriveApp.getFileById(s.ownerSignatureFileId).setTrashed(true); } catch (e) { /* ไม่มีไฟล์เดิม */ } }
+  if (!sig) {
+    fsUpdate_(COL.SETTINGS, 'main', { ownerSignatureFileId: '', ownerSignatureW: 0, ownerSignatureH: 0 });
+    clearSettingsCache_();
+    audit_(me, 'ลบลายเซ็นผู้ให้เช่า', s.ownerName || '', '');
+    return true;
+  }
+  const bytes = Utilities.base64Decode(sig.data || '');
+  if (!bytes.length || bytes.length > 400 * 1024) throw new Error('ไฟล์ลายเซ็นไม่ถูกต้องหรือใหญ่เกินไป');
+  const f = DriveApp.getFolderById(signFolder_()).createFile(Utilities.newBlob(bytes, 'image/png', 'signature_owner.png'));
+  f.setDescription('signature:owner');
+  fsUpdate_(COL.SETTINGS, 'main', { ownerSignatureFileId: f.getId(), ownerSignatureW: Number(sig.w) || 0, ownerSignatureH: Number(sig.h) || 0 });
+  clearSettingsCache_();
+  audit_(me, 'ตั้งลายเซ็นผู้ให้เช่า', s.ownerName || '', '');
+  return true;
 }
 
 // ---------- ไฟล์ ----------

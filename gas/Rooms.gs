@@ -288,13 +288,23 @@ function apiSaveSettings(token, s) {
     if (s[k] === undefined) return;
     upd[k] = nums.indexOf(k) >= 0 ? Number(s[k]) || 0 : s[k];
   });
+  const before = getSettings_();
+  let feesChanged = false;
   if (upd.otherFees) {
     upd.otherFees = upd.otherFees
       .filter(function (f) { return f && f.name; })
-      .map(function (f) { return { name: String(f.name), amount: Number(f.amount) || 0 }; });
+      .map(function (f) { return { name: String(f.name).trim(), amount: Number(String(f.amount).replace(/[^0-9.]/g, '')) || 0 }; });
+    feesChanged = JSON.stringify(upd.otherFees) !== JSON.stringify(before.otherFees || []);
   }
   fsUpdate_(COL.SETTINGS, 'main', upd);
   clearSettingsCache_();
   audit_(me, 'แก้ไขการตั้งค่า', '', Object.keys(upd).join(', '));
-  return getSettings_();
+  const out = getSettings_();
+  // ค่าใช้จ่ายอื่นเปลี่ยน: บอกใบแจ้งหนี้ที่ยังไม่ชำระ เพื่อให้ออกใหม่ให้รวมค่าใหม่
+  if (feesChanged) {
+    const by = {};
+    fsWhere_(COL.INVOICES, { status: 'unpaid' }).forEach(function (i) { (by[i.month] = by[i.month] || []).push(i.roomId); });
+    out.unpaidToReissue = Object.keys(by).sort().map(function (m) { return { month: m, roomIds: by[m] }; });
+  }
+  return out;
 }
