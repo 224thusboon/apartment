@@ -1701,6 +1701,13 @@
       <div class="card">${backups.length ? backups.slice(0, 6).map((b) => `
         <div class="list-item row spread"><span>${esc(b.name)}</span><span class="muted" style="font-size:13px">${thDate(b.at)} · ${fmt(b.size / 1024)} KB</span></div>`).join('') : '<span class="muted">ยังไม่มีไฟล์สำรอง</span>'}</div>
 
+      <div class="card alert-bad" style="margin-top:16px">
+        <div class="row spread"><div class="grow"><strong>ล้างข้อมูลทั้งหมด (reset)</strong>
+          <div style="font-size:14px">ลบผู้เช่า การเข้าพัก มิเตอร์ ใบแจ้งหนี้ ใบเสร็จ สลิป งานซ่อม บัญชี และบันทึกการทำงาน ห้องทุกห้องกลับเป็นห้องว่าง
+          · คงไว้: การตั้งค่า ผู้ดูแล ลายเซ็น และรายการห้อง · ระบบสำรองข้อมูลให้ก่อนล้างเสมอ · ต้องยืนยันด้วยรหัส master</div></div>
+          <button type="button" class="small danger" id="resetDb">ล้างข้อมูล</button></div>
+      </div>
+
       ${sec('บันทึกการทำงาน', `<input type="month" id="auditMon" value="${auditMonth}" style="width:auto">`)}
       <div class="row spread" style="margin:-6px 0 8px">
         <span class="muted" style="font-size:13px">${logs.length ? logs.length + ' รายการ · เลื่อนในกรอบเพื่อดูรายการเก่า · ' : ''}ระบบเก็บไว้ 120 วัน</span>
@@ -1744,6 +1751,29 @@
       });
     });
     $('#backupNow').onclick = (e) => busy(e.target, async () => { const n = await api('apiBackupNow'); toast('สำรองแล้ว: ' + n); loadSystemPanel(auditMonth); });
+    $('#resetDb').onclick = () => {
+      const b = openModal('ล้างข้อมูลทั้งหมด', `
+        <form id="rsForm">
+          <div class="card alert-bad" style="font-size:14px;margin:0 0 12px">ข้อมูลผู้เช่า บิล ใบเสร็จ สลิป งานซ่อม บัญชี และบันทึกการทำงานจะถูกลบทั้งหมด
+            ระบบจะสำรองไว้ก่อน 1 ชุด (ดูได้ที่โฟลเดอร์ "สำรองข้อมูล") ไฟล์ใน Drive ไม่ถูกลบ</div>
+          <label>พิมพ์คำว่า ล้างข้อมูล เพื่อยืนยัน</label><input name="confirm" autocomplete="off" required>
+          <label>รหัส master</label><input name="pw" type="password" autocomplete="off" required>
+          <p><button type="submit" class="danger">ล้างข้อมูลทั้งหมด</button></p>
+        </form>`);
+      $('#rsForm', b).onsubmit = (ev) => {
+        ev.preventDefault();
+        const f = formData(ev.target);
+        if (f.confirm.trim() !== 'ล้างข้อมูล') { toast('พิมพ์คำว่า ล้างข้อมูล ให้ถูกต้อง', true); return; }
+        busy($('button[type=submit]', ev.target), async () => {
+          const r = await api('apiResetDatabase', f.pw);
+          state.cache = {};
+          closeModal();
+          toast('ล้างข้อมูลแล้ว ' + r.deleted + ' รายการ · สำรองไว้ที่ ' + r.backup);
+          loadAdmin().catch(() => {});
+          loadSystemPanel();
+        });
+      };
+    };
     if ($('#myPw')) $('#myPw').onclick = () => myPasswordForm();
   }
 

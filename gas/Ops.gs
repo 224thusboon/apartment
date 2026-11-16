@@ -100,6 +100,59 @@ function backupFirestore_() {
   return name;
 }
 
+// ---------- ล้างข้อมูล (reset) ----------
+
+/**
+ * ล้างข้อมูลการใช้งานทั้งหมด เพื่อเริ่มใช้งานจริง  ต้องยืนยันด้วยรหัส master
+ * - สำรองข้อมูลทั้งหมดไว้ก่อนเสมอ (กู้คืนได้จากไฟล์สำรอง)
+ * - ลบ: ผู้เช่า การเข้าพัก มิเตอร์ ใบแจ้งหนี้ ใบเสร็จ สลิป งานซ่อม รายการเรียกเก็บ บัญชี ตัวนับเลขที่ บันทึกการทำงาน
+ *   และ session ผู้เช่าทั้งหมด
+ * - คงไว้: การตั้งค่า ผู้ดูแล (รวมลายเซ็น) และห้อง (รีเซ็ตเป็นห้องว่าง)
+ * - ไฟล์ใน Drive ไม่ถูกลบ
+ */
+function apiResetDatabase(token, masterPassword) {
+  const me = requireSession_(token, 'admin');
+  const lockKey = 'reset';
+  checkLock_(lockKey);
+  const master = prop_('ADMIN_PASSWORD');
+  if (!master || String(masterPassword || '') !== master) {
+    throw new Error('รหัส master ไม่ถูกต้อง (' + loginFailed_(lockKey) + ')');
+  }
+  clearFail_(lockKey);
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const backup = backupFirestore_();
+    const wipe = [COL.TENANTS, COL.TENANCIES, COL.READINGS, COL.INVOICES, COL.PAYMENTS, COL.REPAIRS,
+      COL.CHARGES, COL.LEDGER, COL.RECEIPTS, COL.COUNTERS, COL.AUDIT];
+    const base = fsBase_();
+    let n = 0;
+    const del = function (col, rows) {
+      for (let i = 0; i < rows.length; i += 50) {
+        UrlFetchApp.fetchAll(rows.slice(i, i + 50).map(function (x) {
+          return fsReq_(base + '/' + col + '/' + encodeURIComponent(x.id), 'delete');
+        }));
+      }
+      n += rows.length;
+    };
+    const lists = fsMulti_(wipe.map(function (c) { return { list: c }; }));
+    wipe.forEach(function (c, i) { del(c, lists[i]); });
+    // session ผู้เช่าทั้งหมด (ผู้ดูแลยังอยู่ในระบบ)
+    del(COL.SESSIONS, fsWhere_(COL.SESSIONS, { role: 'tenant' }));
+    // ห้องกลับเป็นห้องว่าง
+    const rooms = fsList_(COL.ROOMS);
+    const docs = {};
+    rooms.forEach(function (r) {
+      docs[r.id] = Object.assign({}, r, { status: r.status === 'maintenance' ? 'maintenance' : 'vacant', currentTenancyId: '' });
+    });
+    fsSetMany_(COL.ROOMS, docs);
+    audit_(me, 'ล้างข้อมูลทั้งหมด', backup, 'ลบ ' + n + ' รายการ · สำรองไว้ที่ไฟล์ ' + backup);
+    return { backup: backup, deleted: n };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function apiListBackups(token) {
   requireSession_(token, 'admin');
   const s = getSettings_();
