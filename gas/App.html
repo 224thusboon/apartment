@@ -640,6 +640,7 @@
             <div class="muted">ย้ายเข้า ${thDate(cur.moveIn)} · ค่าเช่า ${fmt(cur.rent)} ฿ · ประกัน ${fmt(cur.deposit)} ฿</div></div>
           </div>
           <div class="row" style="margin-top:14px">
+            <button type="button" class="small ghost" id="btnEditTenant">แก้ไขข้อมูลผู้เช่า</button>
             <button type="button" class="small" id="btnContract">${cur.contractFileId ? 'สร้างสัญญาใหม่' : 'สร้างสัญญาเช่า'}</button>
             ${cur.contractFileId ? `<button type="button" class="small ghost" data-file="${esc(cur.contractFileId)}" data-title="สัญญาเช่า">ดูสัญญา</button>` : ''}
             <button type="button" class="small ghost" id="btnCharge">เรียกเก็บเพิ่ม</button>
@@ -760,12 +761,45 @@
           openRoom(roomId);
         } catch (err) { fail(err); lbl.classList.remove('disabled'); }
       };
-      $('#btnContract', body).onclick = (e) => busy(e.target, async () => {
-        const res = await api('apiGenerateContract', cur.id);
+      const contractDone = (res) => {
         toast('สร้างสัญญาแล้ว');
         openModal('สัญญาเช่า', `<p>สร้างสัญญาเรียบร้อย</p>
           <p class="row"><button type="button" data-file="${esc(res.pdfId)}" data-title="สัญญาเช่า">ดู PDF</button>
-          <a class="btn ghost" href="${esc(res.docUrl)}" target="_blank" rel="noopener">แก้ไขใน Google Docs</a></p>`);
+          <a class="btn ghost" href="${esc(res.docUrl)}" target="_blank" rel="noopener">แก้ไขใน Google Docs</a>
+          <button type="button" class="ghost" id="backRoom">กลับไปที่ห้อง</button></p>`);
+        $('#backRoom').onclick = () => openRoom(roomId);
+      };
+      $('#btnContract', body).onclick = (e) => busy(e.target, async () => contractDone(await api('apiGenerateContract', cur.id)));
+      // แก้ชื่อ/ข้อมูลผู้เช่า แล้วสร้างสัญญาใหม่ด้วยข้อมูลที่แก้ (เลือกได้)
+      $('#btnEditTenant', body).onclick = (e) => busy(e.target, async () => {
+        const tn = (await api('apiGetTenant', cur.tenantId)) || {};
+        const b = openModal('แก้ไขข้อมูลผู้เช่า ห้อง ' + roomId, `
+          <form id="tnForm">
+            <label>ชื่อ-นามสกุล</label><input name="name" value="${esc(tn.name || cur.tenantName)}" required>
+            <div class="grid2">
+              <div><label>เบอร์โทร</label><input name="phone" value="${esc(tn.phone || '')}" inputmode="tel"></div>
+              <div><label>เลขบัตรประชาชน</label><input name="idCard" value="${esc(tn.idCard || '')}" inputmode="numeric"></div>
+            </div>
+            <label>ที่อยู่ตามบัตร</label><textarea name="address">${esc(tn.address || '')}</textarea>
+            <div class="grid2">
+              <div><label>ค่าเช่า (บาท/เดือน)</label><input name="rent" type="number" value="${esc(cur.rent)}"></div>
+              <div><label>เงินประกัน (บาท)</label><input name="deposit" type="number" value="${esc(cur.deposit)}"></div>
+              <div><label>วันที่ย้ายเข้า</label><input name="moveIn" type="date" value="${esc(cur.moveIn)}"></div>
+            </div>
+            <label class="row" style="color:var(--text);font-weight:400;margin-top:14px"><input type="checkbox" name="newContract" checked style="width:auto"> สร้างสัญญาเช่าใหม่ด้วยข้อมูลนี้${cur.contractFileId ? ' (สัญญาเดิมยังเก็บไว้ใน Drive)' : ''}</label>
+            <p class="muted" style="font-size:13px">ใบแจ้งหนี้ที่ออกไปแล้วไม่เปลี่ยนชื่อเอง ถ้าต้องการ กด "ทำ PDF ใหม่" ที่หน้าบิล</p>
+            <p><button type="submit">บันทึก</button></p>
+          </form>`);
+        $('#tnForm', b).onsubmit = (ev) => {
+          ev.preventDefault();
+          const f = formData(ev.target);
+          busy($('button[type=submit]', ev.target), async () => {
+            await api('apiUpdateTenant', cur.id, f);
+            if (state.tab === 'rooms') adminRooms();
+            if (f.newContract) contractDone(await api('apiGenerateContract', cur.id));
+            else { toast('บันทึกแล้ว'); openRoom(roomId); }
+          });
+        };
       });
       $('#btnCharge', body).onclick = () => chargeForm({ roomId, reopenRoom: true });
       $('#btnCharge2', body).onclick = () => chargeForm({ roomId, reopenRoom: true });
