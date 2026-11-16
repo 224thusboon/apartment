@@ -47,6 +47,7 @@ function monthSheet_(month) {
     return {
       roomId: room.id,
       tenantName: t.tenantName || '',
+      tenantNick: t.tenantNick || '',
       prevWater: usePrev ? p.water : (t.startWater || 0),
       prevElectric: usePrev ? p.electric : (t.startElectric || 0),
       // เลขตามที่จด (เก็บเลข 0 ข้างหน้าไว้)

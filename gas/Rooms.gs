@@ -36,6 +36,7 @@ function apiAdminBootstrap(token) {
   rooms.forEach(function (x) {
     const t = byId[x.currentTenancyId];
     x.tenantName = t ? t.tenantName : '';
+    x.tenantNick = t ? t.tenantNick || '' : '';
     x.moveIn = t ? t.moveIn : '';
     x.due = due[x.id] || null;
   });
@@ -170,6 +171,7 @@ function apiMoveIn(token, data) {
     roomId: room.id,
     tenantId: tenant.id,
     tenantName: tenant.name,
+    tenantNick: tenant.nickname || '',
     moveIn: data.moveIn || today_(),
     moveOut: '',
     rent: Number(data.rent) || room.rent,
@@ -241,7 +243,7 @@ function apiUpdateTenant(token, tenancyId, data) {
   fsUpdate_(COL.TENANTS, t.tenantId, {
     name: name, nickname: data.nickname || '', phone: data.phone || '', idCard: data.idCard || '', address: data.address || '',
   });
-  const upd = { tenantName: name };
+  const upd = { tenantName: name, tenantNick: data.nickname || '' };
   if (data.rent !== undefined && data.rent !== '') upd.rent = Number(data.rent) || 0;
   if (data.deposit !== undefined && data.deposit !== '') upd.deposit = Number(data.deposit) || 0;
   if (data.moveIn) upd.moveIn = data.moveIn;

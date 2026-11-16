@@ -51,6 +51,8 @@
   };
   const ic = (name) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ''}</svg>`;
   const sec = (title, right) => `<div class="sec"><h2>${title}</h2>${right ? `<div class="row">${right}</div>` : ''}</div>`;
+  // ชื่อจริง (ชื่อเล่น) สำหรับแสดงในแอป ไม่ใช้ในเอกสาร
+  const withNick = (name, nick) => esc(name) + (nick ? ' <span class="muted" style="font-weight:400">(' + esc(nick) + ')</span>' : '');
   const initial = (name) => esc(String(name || '?').replace(/^(นาย|นางสาว|นาง|น\.ส\.)\s*/, '').trim().charAt(0) || '?');
 
   const PUB = window.PUB || {};
@@ -585,7 +587,7 @@
           return `
           <button type="button" class="room ${esc(r.status)}${late ? ' late' : ''}" data-room="${esc(r.id)}">
             <div class="room-top"><span class="no">${esc(r.number)}</span><span class="ic">${ic(r.status === 'occupied' ? 'user' : r.status === 'maintenance' ? 'wrench' : 'door')}</span></div>
-            <div class="who">${r.tenantName ? esc(r.tenantName) : '<span class="muted">—</span>'}</div>
+            <div class="who">${r.tenantName ? withNick(r.tenantName, r.tenantNick) : '<span class="muted">—</span>'}</div>
             <div class="row spread"><span class="meta">${fmt(r.rent)} ฿/เดือน</span>${pill(r.status)}</div>
             ${tag ? `<div>${tag}</div>` : ''}
           </button>`;
@@ -636,7 +638,7 @@
         <div class="card">
           <div class="tenant-head">
             <span class="avatar">${initial(cur.tenantName)}</span>
-            <div class="grow"><div class="row spread"><strong style="font-size:18px">${esc(cur.tenantName)}</strong>${pill('active')}</div>
+            <div class="grow"><div class="row spread"><strong style="font-size:18px">${withNick(cur.tenantName, cur.tenantNick)}</strong>${pill('active')}</div>
             <div class="muted">ย้ายเข้า ${thDate(cur.moveIn)} · ค่าเช่า ${fmt(cur.rent)} ฿ · ประกัน ${fmt(cur.deposit)} ฿</div></div>
           </div>
           <div class="row" style="margin-top:14px">
@@ -695,7 +697,7 @@
       <div class="card">${d.tenancies.length ? d.tenancies.map((t) => `
         <div class="list-item">
           <div class="row spread">
-            <div class="grow"><strong>${esc(t.tenantName)}</strong>
+            <div class="grow"><strong>${withNick(t.tenantName, t.tenantNick)}</strong>
               <div class="muted">${thDate(t.moveIn)} – ${t.moveOut ? thDate(t.moveOut) : 'ปัจจุบัน'}${t.note ? ' · ' + esc(t.note) : ''}</div>
               ${t.contractRetainUntil ? `<div class="muted" style="font-size:13px">สัญญา (ระบบสร้าง) เก็บถึง ${thDate(t.contractRetainUntil)}</div>` : ''}</div>
             <div>${pill(t.status)} ${t.contractFileId ? `<button type="button" class="small ghost" data-file="${esc(t.contractFileId)}" data-title="สัญญาเช่า">สัญญา</button>` : ''}</div>
@@ -898,7 +900,7 @@
           <div class="mrow card" data-room="${esc(r.roomId)}">
             <div class="mroom">
               <span class="mno">${esc(r.roomId)}</span>
-              <span class="mname" title="${esc(r.tenantName)}">${esc(r.tenantName)}</span>
+              <span class="mname" title="${esc(r.tenantName)}">${withNick(r.tenantName, r.tenantNick)}</span>
             </div>
             ${meterCell('water', 'น้ำ', 'drop', r.prevWater, r.prevWaterText, r.waterText)}
             ${meterCell('electric', 'ไฟ', 'bolt', r.prevElectric, r.prevElectricText, r.electricText)}
