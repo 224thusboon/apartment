@@ -891,7 +891,7 @@
             <div class="mcell" data-kind="${kind}" data-prev="${esc(prev)}" data-prevtext="${esc(prevText)}" data-change="${esc(ch ? JSON.stringify(ch) : '')}">
               <span class="mlab">${ic(icon)} ${label}</span>
               <div class="min">
-                <span class="mprev" title="เลขเดือนก่อน">${esc(prevText)}</span>
+                <button type="button" class="mprev" data-prevedit="${esc(r.roomId)}" data-kind="${kind}" title="กดเพื่อแก้เลขเดือนก่อน / มิเตอร์ตั้งต้น">${esc(prevText)}</button>
                 <span class="marrow">→</span>
                 <input name="${kind}" type="text" inputmode="numeric" autocomplete="off" value="${esc(val)}" placeholder="เลขล่าสุด" aria-label="${label} ห้อง ${esc(r.roomId)}">
               </div>
@@ -973,6 +973,21 @@
       out.textContent = `ใช้ ${fmt(u)} หน่วย` + (rate ? ` · ${fmt(amt)} บาท` : '');
     };
     $$('#meter .mcell').forEach((cell) => { usage(cell); $('input', cell).addEventListener('input', () => usage(cell)); });
+    // แก้เลขเดือนก่อน (ถ้าเพิ่งย้ายเข้า = มิเตอร์ตั้งต้นของผู้เช่า)
+    $$('[data-prevedit]').forEach((b) => {
+      b.onclick = async () => {
+        const label = b.dataset.kind === 'water' ? 'น้ำ' : 'ไฟ';
+        const v = await askText(`เลขมิเตอร์${label}เดือนก่อน ห้อง ${b.dataset.prevedit}\n(ถ้าเพิ่งย้ายเข้า คือเลขตอนย้ายเข้า)`, b.textContent.trim());
+        if (v === null || v.trim() === b.textContent.trim()) return;
+        busy(b, async () => {
+          const filled = collect().filter((x) => x.water !== '' && x.electric !== '');
+          if (filled.length) await api('apiSaveReadings', month, filled);
+          const r = await api('apiSetPrevReading', month, b.dataset.prevedit, b.dataset.kind, v.trim());
+          toast(`แก้${r.source === 'start' ? 'มิเตอร์ตั้งต้น' : 'เลขเดือนก่อน'}แล้ว`);
+          await adminBilling(month);
+        });
+      };
+    });
     $$('[data-mchange]').forEach((b) => {
       b.onclick = () => {
         const cell = b.closest('.mcell');

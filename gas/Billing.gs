@@ -226,6 +226,43 @@ function apiGenerateInvoices(token, month, roomIds) {
  * kind: 'water' | 'electric'
  * data: {type:'replace', date, oldFinal, newStart, note} | {type:'rollover', digits, note} | null (ลบ)
  */
+/**
+ * แก้เลขมิเตอร์ "เดือนก่อน" ของห้องในเดือนนั้น
+ * - ถ้ามีเลขที่จดไว้ของเดือนก่อน (และไม่ได้ย้ายเข้าเดือนนี้) แก้ที่เลขเดือนก่อน
+ * - ถ้าไม่มี (เพิ่งย้ายเข้า) แก้มิเตอร์ตั้งต้นของการเข้าพัก
+ */
+function apiSetPrevReading(token, month, roomId, kind, value) {
+  const me = requireSession_(token, 'admin');
+  if (['water', 'electric'].indexOf(kind) < 0) throw new Error('ประเภทมิเตอร์ไม่ถูกต้อง');
+  const v = meterVal_(value);
+  if (!v) throw new Error('กรุณากรอกเลขมิเตอร์');
+  const room = fsGet_(COL.ROOMS, roomId);
+  if (!room || !room.currentTenancyId) throw new Error('ห้องนี้ไม่มีผู้เช่า');
+  const t = fsGet_(COL.TENANCIES, room.currentTenancyId) || {};
+  const prev = prevMonth_(month);
+  const p = fsGet_(COL.READINGS, roomId + '_' + prev);
+  const movedInThisMonth = t.moveIn && t.moveIn.slice(0, 7) >= month;
+  const label = kind === 'water' ? 'น้ำ' : 'ไฟ';
+  const upd = {};
+  upd[kind] = v.n;
+  upd[kind + 'Text'] = v.t;
+  let source;
+  if (p && p.water != null && !movedInThisMonth) {
+    fsUpdate_(COL.READINGS, p.id, upd);
+    source = 'reading';
+    audit_(me, 'แก้เลขมิเตอร์เดือนก่อน', 'ห้อง ' + roomId + ' เดือน ' + prev, label + ' ' + (p[kind + 'Text'] || p[kind]) + ' → ' + v.t);
+  } else {
+    const k = kind === 'water' ? 'startWater' : 'startElectric';
+    const tu = {};
+    tu[k] = v.n;
+    tu[k + 'Text'] = v.t;
+    fsUpdate_(COL.TENANCIES, t.id, tu);
+    source = 'start';
+    audit_(me, 'แก้มิเตอร์ตั้งต้น', 'ห้อง ' + roomId, label + ' ' + (t[k + 'Text'] || t[k] || 0) + ' → ' + v.t);
+  }
+  return { source: source };
+}
+
 function apiSaveMeterChange(token, month, roomId, kind, data) {
   const me = requireSession_(token, 'admin');
   if (['water', 'electric'].indexOf(kind) < 0) throw new Error('ประเภทมิเตอร์ไม่ถูกต้อง');

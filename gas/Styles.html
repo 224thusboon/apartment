@@ -201,7 +201,9 @@
   .mlab { display: flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
   .mlab svg.i { width: 15px; height: 15px; }
   .min { display: flex; align-items: center; gap: 6px; }
-  .mprev { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; white-space: nowrap; }
+  .mprev { all: unset; cursor: pointer; font-variant-numeric: tabular-nums; color: var(--muted); font-size: 14px; white-space: nowrap;
+    border-bottom: 1px dashed currentColor; }
+  .mprev:hover, .mprev:focus-visible { color: var(--accent); }
   .marrow { color: var(--muted); font-size: 13px; }
   .min input { padding: 8px 10px; min-width: 0; width: 100%; font-variant-numeric: tabular-nums; }
   @media (min-width: 900px) { .min input { max-width: 130px; } }
