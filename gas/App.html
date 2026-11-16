@@ -847,13 +847,74 @@
     }
   }
 
-  function showPin(roomId, pin) {
+  // ลิงก์แอปสำหรับผู้เช่า (หน้าติดตั้ง PWA)
+  const APP_LINK = 'https:\/\/224thusboon.github.io/apartment/';
+  let qrReady = null;
+  function loadQr() {
+    if (!qrReady) {
+      qrReady = new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = 'https:\/\/cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+        s.onload = () => resolve(window.qrcode);
+        s.onerror = () => { qrReady = null; reject(new Error('โหลดตัวสร้าง QR ไม่ได้')); };
+        document.head.appendChild(s);
+      });
+    }
+    return qrReady;
+  }
+  async function qrDataUrl(text) {
+    const qr = (await loadQr())(0, 'M');
+    qr.addData(text);
+    qr.make();
+    return qr.createDataURL(8, 2);
+  }
+
+  async function showPin(roomId, pin) {
+    const dorm = (state.admin && state.admin.settings && state.admin.settings.dormName) || '';
     const b = openModal('PIN สำหรับผู้เช่า', `
       <p>ให้ผู้เช่าเข้าระบบด้วย <strong>เลขห้อง ${esc(roomId)}</strong> และ PIN นี้</p>
       <div class="pin">${esc(pin)}</div>
+      <div class="pin-qr"><div class="muted" style="font-size:13px">กำลังสร้าง QR…</div></div>
+      <p class="muted" style="font-size:14px;text-align:center;margin-top:4px">สแกนเพื่อเปิดแอป · ${esc(APP_LINK)}</p>
       <p class="muted">PIN จะแสดงครั้งเดียว ถ้าลืมให้กด "ออก PIN ใหม่"</p>
-      <p><button type="button" id="pinOk">เสร็จ</button></p>`);
+      <p class="row"><button type="button" id="pinPrint">${ic('print')} พิมพ์ใบ PIN (A5)</button>
+        <button type="button" class="ghost" id="pinOk">เสร็จ</button></p>`);
     $('#pinOk', b).onclick = () => openRoom(roomId);
+    let qr = '';
+    try {
+      qr = await qrDataUrl(APP_LINK);
+      const box = $('.pin-qr', b);
+      if (box) box.innerHTML = `<img src="${qr}" alt="QR code ลิงก์แอป">`;
+    } catch (e) { const box = $('.pin-qr', b); if (box) box.innerHTML = `<div class="muted">${esc(e.message)}</div>`; }
+    $('#pinPrint', b).onclick = () => printPinCard({ dorm, roomId, pin, qr });
+  }
+
+  // พิมพ์ใบแจ้ง PIN ขนาด A5 (ชื่อหอ ห้อง PIN QR และวิธีเข้าใช้งาน)
+  function printPinCard(c) {
+    let area = $('#printArea');
+    if (!area) { area = document.createElement('div'); area.id = 'printArea'; document.body.appendChild(area); }
+    area.innerHTML = `<div class="pin-card">
+      <div class="pc-dorm">${esc(c.dorm)}</div>
+      <div class="pc-title">ข้อมูลเข้าใช้งานแอปสำหรับผู้เช่า</div>
+      <div class="pc-room">ห้อง ${esc(c.roomId)}</div>
+      <div class="pc-label">PIN</div>
+      <div class="pc-pin">${esc(c.pin)}</div>
+      ${c.qr ? `<img class="pc-qr" src="${c.qr}" alt="">` : ''}
+      <div class="pc-link">${esc(APP_LINK)}</div>
+      <ol class="pc-steps">
+        <li>สแกน QR code หรือเปิดลิงก์ด้านบน</li>
+        <li>ติดตั้งแอปลงหน้าจอหลักตามคำแนะนำ แล้วเปิดจากไอคอน</li>
+        <li>เลือก "ผู้เช่า" ใส่เลขห้อง ${esc(c.roomId)} และ PIN ด้านบน</li>
+      </ol>
+      <div class="pc-note">เก็บ PIN ไว้เป็นความลับ ถ้าลืมหรือสงสัยว่ารั่ว แจ้งผู้ดูแลเพื่อออก PIN ใหม่</div>
+    </div>`;
+    const ps = document.createElement('style');
+    ps.textContent = '@media print { @page { size: A5 portrait; margin: 0; } }';
+    document.head.appendChild(ps);
+    const done = () => { area.innerHTML = ''; ps.remove(); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    const im = $('.pc-qr', area);
+    if (im && !im.complete) im.onload = () => window.print(); else window.print();
   }
 
   // ---------- บิล / มิเตอร์ ----------

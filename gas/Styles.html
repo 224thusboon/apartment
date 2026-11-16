@@ -328,12 +328,26 @@
   .ask-msg { white-space: pre-line; margin: 0 0 10px; font-size: 16px; }
   .pdf-pages canvas { display: block; background: #fff; border-radius: 8px; box-shadow: var(--shadow); }
   #printArea { display: none; }
+  .pin-qr { display: grid; place-items: center; margin-top: 12px; }
+  .pin-qr img { width: 180px; height: 180px; background: #fff; padding: 8px; border-radius: 12px; image-rendering: pixelated; }
+  .pin-card { width: 148mm; height: 209mm; box-sizing: border-box; padding: 14mm 12mm; color: #111; background: #fff;
+    display: flex; flex-direction: column; align-items: center; text-align: center; font-family: 'Sarabun', sans-serif; }
+  .pc-dorm { font-size: 22pt; font-weight: 700; }
+  .pc-title { font-size: 12pt; color: #444; margin-top: 2mm; }
+  .pc-room { font-size: 18pt; font-weight: 700; margin-top: 8mm; }
+  .pc-label { font-size: 11pt; color: #555; margin-top: 4mm; }
+  .pc-pin { font-size: 34pt; font-weight: 700; letter-spacing: 6pt; border: 2px dashed #1a947e; border-radius: 4mm; padding: 2mm 8mm; margin-top: 1mm; }
+  .pc-qr { width: 52mm; height: 52mm; margin-top: 8mm; image-rendering: pixelated; }
+  .pc-link { font-size: 10pt; color: #333; margin-top: 2mm; word-break: break-all; }
+  .pc-steps { text-align: left; font-size: 11pt; margin: 7mm 0 0; padding-left: 6mm; line-height: 1.6; }
+  .pc-note { font-size: 9pt; color: #666; margin-top: auto; }
   @media print {
     @page { size: A4; margin: 0; }
     html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; height: auto !important; min-height: 0 !important; overflow: visible !important; }
     body > *:not(#printArea) { display: none !important; }
     #printArea { display: block !important; }
     #printArea img { display: block; break-after: page; page-break-after: always; break-inside: avoid; }
+    #printArea .pin-card img { break-after: auto; page-break-after: auto; }
     #printArea img.pg-pdf { width: 100%; height: 295mm; object-fit: contain; }
     #printArea img:last-child { break-after: auto; page-break-after: auto; }
     #printArea img.pg-img { width: auto; max-width: 190mm; max-height: 277mm; margin: 10mm auto; object-fit: contain; }
