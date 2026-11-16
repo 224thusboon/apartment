@@ -67,6 +67,8 @@ function apiGenerateContract(token, tenancyId) {
     contractDate: thaiDate_(today_()), tenantName: tenant.name, tenantIdCard: tenant.idCard || '-',
     tenantAddress: tenant.address || '-', tenantPhone: tenant.phone || '-', roomId: t.roomId,
     moveIn: thaiDate_(t.moveIn), rent: money_(t.rent), deposit: money_(t.deposit), dueDay: s.dueDay,
+    rentText: bahtText_(t.rent), floor: String(t.roomId).replace(/\D/g, '').slice(0, -2) || '-',
+    waterRate: s.waterRate, electricRate: s.electricRate,
   };
   const r = renderTemplate_(s.contractTemplateId, s.pdfFolderId,
     'สัญญาเช่า ' + t.roomId + ' ' + tenant.name, map, t.roomId, null, true);
@@ -163,3 +165,64 @@ function retainUntil_(moveOutIso) {
   return (Number(p[0]) + RETAIN_YEARS) + '-' + p[1] + '-' + p[2];
 }
 const RETAIN_YEARS = 10;
+
+// ---------- สัญญาเช่าต้นแบบจากไฟล์ Word ----------
+
+/**
+ * อัปโหลดสัญญาต้นแบบ (.docx) -> แปลงเป็น Google Docs -> แทนช่องว่างที่พบบ่อยด้วยตัวแทน {{...}}
+ * file: {name, data(base64)} ; คืน {url, found:[...], missing:[...]}
+ */
+function apiUploadContractTemplate(token, file) {
+  const me = requireSession_(token, 'admin');
+  if (!file || !file.data) throw new Error('ไม่มีไฟล์');
+  const bytes = Utilities.base64Decode(file.data);
+  if (bytes.length > 10 * 1024 * 1024) throw new Error('ไฟล์ใหญ่เกิน 10MB');
+  const s = getSettings_();
+  const DOCX = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+  const meta = { name: 'แม่แบบ - สัญญาเช่า (' + String(file.name || '').replace(/\.docx$/i, '') + ')',
+    mimeType: 'application/vnd.google-apps.document', parents: [s.rootFolderId] };
+  const b = 'ctb' + Date.now();
+  const head = Utilities.newBlob('--' + b + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(meta) +
+    '\r\n--' + b + '\r\nContent-Type: ' + DOCX + '\r\n\r\n').getBytes();
+  const tail = Utilities.newBlob('\r\n--' + b + '--').getBytes();
+  const res = UrlFetchApp.fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+    method: 'post', contentType: 'multipart/related; boundary=' + b, payload: head.concat(bytes).concat(tail),
+    headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true,
+  });
+  if (res.getResponseCode() >= 300) throw new Error('แปลงไฟล์ไม่สำเร็จ: ' + res.getContentText().slice(0, 200));
+  const id = JSON.parse(res.getContentText()).id;
+
+  // แทนช่องว่างจุดไข่ปลาที่พบบ่อยในสัญญาเช่าไทย (แก้เพิ่มเองใน Google Docs ได้)
+  const doc = DocumentApp.openById(id);
+  const body = doc.getBody();
+  const D = '[\\.…]{3,}';
+  const rules = [
+    ['วันที่ทำสัญญา', 'ทำขึ้นเมื่อวันที่\\s*' + D, 'ทำขึ้นเมื่อวันที่ {{contractDate}}'],
+    ['ชื่อและที่อยู่ผู้เช่า', 'กับ\\s*' + D + '\\s*ที่อยู่.*?จ\\.?\\s*' + D, 'กับ {{tenantName}} ที่อยู่ {{tenantAddress}}'],
+    ['เลขห้องและชั้น', 'เลขที่\\s*' + D + '\\s*ชั้นที่\\s*' + D, 'เลขที่ {{roomId}} ชั้นที่ {{floor}}'],
+    ['วันเริ่มเช่า', 'นับตั้งแต่วันที่\\s*' + D, 'นับตั้งแต่วันที่ {{moveIn}}'],
+    ['ค่าเช่า', 'เดือนละ\\s*[0-9,]+\\s*บาท\\s*\\([^)]*\\)', 'เดือนละ {{rent}} บาท ({{rentText}})'],
+    ['ค่าไฟ', 'ค่าไฟหน่วยละ\\s*[0-9.]+', 'ค่าไฟหน่วยละ {{electricRate}}'],
+    ['ค่าน้ำ', 'ค่าน้ำประปาหน่วยละ\\s*[0-9.]+', 'ค่าน้ำประปาหน่วยละ {{waterRate}}'],
+    ['วันครบกำหนดชำระ', 'ภายในวันที่\\s*[0-9]+\\s*ของทุกเดือน', 'ภายในวันที่ {{dueDay}} ของทุกเดือน'],
+    ['เลขห้องในรายการสิ่งของ', 'ห้องเลขที่\\s*' + D, 'ห้องเลขที่ {{roomId}}'],
+  ];
+  const found = [], missing = [];
+  rules.forEach(function (r) {
+    if (body.findText(r[1])) { body.replaceText(r[1], r[2]); found.push(r[0]); } else missing.push(r[0]);
+  });
+  // ชื่อผู้เช่าใต้ช่องลงชื่อ "ผู้เช่า": วงเล็บจุดไข่ปลาวงแรก
+  const sig = body.findText('\\(\\s*' + D + '\\s*\\)');
+  if (sig) {
+    const el = sig.getElement().asText();
+    el.deleteText(sig.getStartOffset(), sig.getEndOffsetInclusive());
+    el.insertText(sig.getStartOffset(), '({{tenantName}})');
+    found.push('ชื่อผู้เช่าใต้ลายเซ็น');
+  } else missing.push('ชื่อผู้เช่าใต้ลายเซ็น');
+  doc.saveAndClose();
+
+  fsUpdate_(COL.SETTINGS, 'main', { contractTemplateId: id, contractTemplatePrevId: s.contractTemplateId || '' });
+  clearSettingsCache_();
+  audit_(me, 'ตั้งสัญญาเช่าต้นแบบ', file.name || '', 'ใส่ช่องข้อมูลอัตโนมัติ ' + found.length + ' จุด');
+  return { url: 'https://docs.google.com/document/d/' + id + '/edit', found: found, missing: missing };
+}

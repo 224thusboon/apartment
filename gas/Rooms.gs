@@ -259,11 +259,15 @@ function apiUpdateTenant(token, tenancyId, data) {
   if (data.rent !== undefined && data.rent !== '') upd.rent = Number(data.rent) || 0;
   if (data.deposit !== undefined && data.deposit !== '') upd.deposit = Number(data.deposit) || 0;
   if (data.moveIn) upd.moveIn = data.moveIn;
+  // มิเตอร์ตั้งต้นตอนย้ายเข้า (เก็บเลขตามที่จด รวม 0 ข้างหน้า)
+  const sw = meterVal_(data.startWater), se = meterVal_(data.startElectric);
+  if (sw) { upd.startWater = sw.n; upd.startWaterText = sw.t; }
+  if (se) { upd.startElectric = se.n; upd.startElectricText = se.t; }
   fsUpdate_(COL.TENANCIES, tenancyId, upd);
   const changes = [];
   if (old.name !== name) changes.push('ชื่อ ' + (old.name || '-') + ' → ' + name);
   ['nickname', 'phone', 'idCard', 'address'].forEach(function (k) { if ((old[k] || '') !== (data[k] || '')) changes.push(k); });
-  ['rent', 'deposit', 'moveIn'].forEach(function (k) { if (upd[k] !== undefined && String(upd[k]) !== String(t[k])) changes.push(k + ' ' + t[k] + ' → ' + upd[k]); });
+  ['rent', 'deposit', 'moveIn', 'startWaterText', 'startElectricText'].forEach(function (k) { if (upd[k] !== undefined && String(upd[k]) !== String(t[k])) changes.push(k + ' ' + t[k] + ' → ' + upd[k]); });
   audit_(me, 'แก้ไขข้อมูลผู้เช่า', 'ห้อง ' + t.roomId, changes.join(' · ') || 'ไม่มีการเปลี่ยนแปลง');
   return true;
 }

@@ -789,6 +789,9 @@
               <div><label>ค่าเช่า (บาท/เดือน)</label><input name="rent" type="number" value="${esc(cur.rent)}"></div>
               <div><label>เงินประกัน (บาท)</label><input name="deposit" type="number" value="${esc(cur.deposit)}"></div>
               <div><label>วันที่ย้ายเข้า</label><input name="moveIn" type="date" value="${esc(cur.moveIn)}"></div>
+              <div></div>
+              <div><label>มิเตอร์น้ำตอนเข้า</label><input name="startWater" type="text" inputmode="numeric" value="${esc(cur.startWaterText || cur.startWater || '')}"></div>
+              <div><label>มิเตอร์ไฟตอนเข้า</label><input name="startElectric" type="text" inputmode="numeric" value="${esc(cur.startElectricText || cur.startElectric || '')}"></div>
             </div>
             <label class="row" style="color:var(--text);font-weight:400;margin-top:14px"><input type="checkbox" name="newContract" checked style="width:auto"> สร้างสัญญาเช่าใหม่ด้วยข้อมูลนี้${cur.contractFileId ? ' (สัญญาเดิมยังเก็บไว้ใน Drive)' : ''}</label>
             <p class="muted" style="font-size:13px">ใบแจ้งหนี้ที่ออกไปแล้วไม่เปลี่ยนชื่อเอง ถ้าต้องการ กด "ทำ PDF ใหม่" ที่หน้าบิล</p>
@@ -1639,11 +1642,31 @@
         <p class="row">
           ${s.invoiceTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https:\/\/docs.google.com/spreadsheets/d/${encodeURIComponent(s.invoiceTemplateId)}/edit">แม่แบบใบแจ้งหนี้</a>` : ''}
           ${s.contractTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="${docUrl(s.contractTemplateId)}">แม่แบบสัญญาเช่า</a>` : ''}
+          <label class="btn ghost" style="margin:0;cursor:pointer">${ic('upload')} อัปโหลดสัญญาต้นแบบ (.docx)<input type="file" id="ctFile" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></label>
           ${s.rootFolderId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https:\/\/drive.google.com/drive/folders/${encodeURIComponent(s.rootFolderId)}">โฟลเดอร์ Drive</a>` : ''}
         </p>
       </div>
       <div id="sysArea"><div class="center muted">กำลังโหลดข้อมูลระบบ…</div></div>`;
     loadSystemPanel();
+    // อัปโหลดสัญญาต้นแบบ .docx -> แปลงเป็น Google Docs และใส่ตัวแทน {{...}} ให้อัตโนมัติ
+    $('#ctFile').onchange = async (e) => {
+      const file = e.target.files[0];
+      const lbl = e.target.closest('label');
+      if (!file) return;
+      if (!(await ask('ใช้ไฟล์ "' + file.name + '" เป็นสัญญาเช่าต้นแบบ?\nสัญญาที่สร้างหลังจากนี้จะใช้แบบนี้ แม่แบบเดิมยังเก็บไว้ใน Drive', { ok: 'ใช้ไฟล์นี้' }))) { e.target.value = ''; return; }
+      lbl.classList.add('disabled');
+      try {
+        const data = await new Promise((ok, no) => { const fr = new FileReader(); fr.onload = () => ok(String(fr.result).split(',')[1]); fr.onerror = no; fr.readAsDataURL(file); });
+        const r = await api('apiUploadContractTemplate', { name: file.name, data });
+        openModal('สัญญาเช่าต้นแบบ', `<p>ตั้งเป็นสัญญาต้นแบบแล้ว ระบบใส่ช่องข้อมูลอัตโนมัติ ${r.found.length} จุด</p>
+          <div class="card" style="font-size:14px">${r.found.map((x) => '<div>' + esc(x) + '</div>').join('') || 'ไม่พบช่องที่ใส่ได้อัตโนมัติ'}</div>
+          ${r.missing.length ? `<p class="muted" style="font-size:14px">ยังไม่พบ: ${r.missing.map(esc).join(', ')} · เปิดแก้ใน Google Docs แล้วพิมพ์ตัวแทนเองได้</p>` : ''}
+          <p class="muted" style="font-size:13px">ตัวแทนที่ใช้ได้: {{contractDate}} {{tenantName}} {{tenantIdCard}} {{tenantAddress}} {{tenantPhone}} {{roomId}} {{floor}} {{moveIn}} {{rent}} {{rentText}} {{deposit}} {{dueDay}} {{waterRate}} {{electricRate}} {{dormName}} {{dormAddress}} {{ownerName}}</p>
+          <p class="row"><a class="btn" href="${esc(r.url)}" target="_blank" rel="noopener">เปิดแก้ใน Google Docs</a></p>`);
+      } catch (err) { fail(err); }
+      lbl.classList.remove('disabled');
+      e.target.value = '';
+    };
     $$('input[name=invoiceStyle]').forEach((r) => {
       r.onchange = async () => {
         $$('.style-opt').forEach((x) => x.classList.toggle('on', $('input', x).checked));
