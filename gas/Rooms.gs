@@ -2,6 +2,13 @@
  * ห้อง / ผู้เช่า / ประวัติการเข้าพัก
  */
 
+/** tenantId -> ชื่อเล่น (ใช้แสดงบนหน้าจอเท่านั้น) */
+function nickMap_(tenants) {
+  const m = {};
+  (tenants || []).forEach(function (x) { if (x.nickname) m[x.id] = x.nickname; });
+  return m;
+}
+
 /** ข้อมูลเริ่มต้นของหน้าแอดมิน */
 function apiAdminBootstrap(token) {
   requireSession_(token, 'admin');
@@ -13,8 +20,10 @@ function apiAdminBootstrap(token) {
     { list: COL.REPAIRS },
     { where: [COL.INVOICES, { status: 'unpaid' }] },
     { where: [COL.INVOICES, { status: 'pending' }] },
+    { list: COL.TENANTS },
   ]);
   const rooms = r[0], tenancies = r[1];
+  const nick = nickMap_(r[6]);
   const byId = {};
   tenancies.forEach(function (t) { byId[t.id] = t; });
 
@@ -36,7 +45,7 @@ function apiAdminBootstrap(token) {
   rooms.forEach(function (x) {
     const t = byId[x.currentTenancyId];
     x.tenantName = t ? t.tenantName : '';
-    x.tenantNick = t ? t.tenantNick || '' : '';
+    x.tenantNick = t ? t.tenantNick || nick[t.tenantId] || '' : '';
     x.moveIn = t ? t.moveIn : '';
     x.due = due[x.id] || null;
   });
@@ -59,7 +68,10 @@ function apiRoomDetail(token, roomId) {
     { where: [COL.REPAIRS, { roomId: roomId }] },
     { where: [COL.INVOICES, { roomId: roomId }] },
     { where: [COL.CHARGES, { roomId: roomId }] },
+    { list: COL.TENANTS },
   ]);
+  const nick = nickMap_(r[5]);
+  r[1].forEach(function (t) { if (!t.tenantNick) t.tenantNick = nick[t.tenantId] || ''; });
   return {
     room: r[0],
     tenancies: sortBy_(r[1], 'moveIn', true),

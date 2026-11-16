@@ -22,8 +22,10 @@ function monthSheet_(month) {
     { where: [COL.READINGS, { month: month }] },
     { where: [COL.INVOICES, { month: month }] },
     { where: [COL.CHARGES, { month: month }] },
+    { list: COL.TENANTS },
   ]);
   const rooms = r[0];
+  const nick = nickMap_(r[6]);
   const charges = {};
   r[5].forEach(function (c) { (charges[c.roomId] = charges[c.roomId] || []).push(c); });
   const tenancies = {};
@@ -47,7 +49,7 @@ function monthSheet_(month) {
     return {
       roomId: room.id,
       tenantName: t.tenantName || '',
-      tenantNick: t.tenantNick || '',
+      tenantNick: t.tenantNick || nick[t.tenantId] || '',
       prevWater: usePrev ? p.water : (t.startWater || 0),
       prevElectric: usePrev ? p.electric : (t.startElectric || 0),
       // เลขตามที่จด (เก็บเลข 0 ข้างหน้าไว้)
