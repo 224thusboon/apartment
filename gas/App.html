@@ -17,6 +17,28 @@
   const thMonth = (ym) => { const p = ym.split('-').map(Number); return TH_M[p[1] - 1] + ' ' + (p[0] + 543); };
   const today = () => { const d = new Date(); d.setMinutes(d.getMinutes() - d.getTimezoneOffset()); return d.toISOString().slice(0, 10); };
   const thisMonth = () => today().slice(0, 7);
+  // ระยะเวลาที่อยู่: นับเดือนเต็มตามวันที่ย้ายเข้า เช่น 1 ปี 3 เดือน / 5 เดือน 12 วัน
+  const stayLen = (from, to) => {
+    if (!from) return '';
+    const a = String(from).slice(0, 10).split('-').map(Number);
+    const b = String(to || today()).slice(0, 10).split('-').map(Number);
+    let m = (b[0] - a[0]) * 12 + (b[1] - a[1]);
+    let d = b[2] - a[2];
+    if (d < 0) { m--; d = Math.max(0, d + new Date(b[0], b[1] - 1, 0).getDate()); }
+    if (m < 0) return '0 วัน';
+    const y = Math.floor(m / 12);
+    m %= 12;
+    const parts = [];
+    if (y) parts.push(y + ' ปี');
+    if (m) parts.push(m + ' เดือน');
+    if (d && !y) parts.push(d + ' วัน');
+    return parts.join(' ') || '0 วัน';
+  };
+  const stayMonths = (from, to) => {
+    const a = String(from).slice(0, 10).split('-').map(Number);
+    const b = String(to || today()).slice(0, 10).split('-').map(Number);
+    return Math.max(0, (b[0] - a[0]) * 12 + (b[1] - a[1]) - (b[2] < a[2] ? 1 : 0));
+  };
 
   const STATUS = {
     paid: 'ชำระแล้ว', pending: 'รอตรวจสลิป', unpaid: 'ค้างชำระ', approved: 'อนุมัติ', rejected: 'ไม่ผ่าน',
@@ -639,6 +661,7 @@
           <button type="button" class="room ${esc(r.status)}${late ? ' late' : ''}" data-room="${esc(r.id)}">
             <div class="room-top"><span class="no">${esc(r.number)}</span><span class="ic">${ic(r.status === 'occupied' ? 'user' : r.status === 'maintenance' ? 'wrench' : 'door')}</span></div>
             <div class="who">${r.tenantName ? withNick(r.tenantName, r.tenantNick) : '<span class="muted">—</span>'}</div>
+            ${r.tenantName && r.moveIn ? `<div class="meta" style="font-size:12px">อยู่ ${stayLen(r.moveIn)}</div>` : ''}
             <div class="row spread"><span class="meta">${fmt(r.rent)} ฿/เดือน</span>${pill(r.status)}</div>
             ${tag ? `<div>${tag}</div>` : ''}
           </button>`;
@@ -690,7 +713,7 @@
           <div class="tenant-head">
             <span class="avatar">${initial(cur.tenantName)}</span>
             <div class="grow"><div class="row spread"><strong style="font-size:18px">${withNick(cur.tenantName, cur.tenantNick)}</strong>${pill('active')}</div>
-            <div class="muted">ย้ายเข้า ${thDate(cur.moveIn)} · ค่าเช่า ${fmt(cur.rent)} ฿ · ประกัน ${fmt(cur.deposit)} ฿</div></div>
+            <div class="muted">ย้ายเข้า ${thDate(cur.moveIn)} · <strong style="color:var(--text)">อยู่มาแล้ว ${stayLen(cur.moveIn)}</strong>${stayMonths(cur.moveIn) >= 12 ? ` (${stayMonths(cur.moveIn)} เดือน)` : ''} · ค่าเช่า ${fmt(cur.rent)} ฿ · ประกัน ${fmt(cur.deposit)} ฿</div></div>
           </div>
           <div class="row" style="margin-top:14px">
             <button type="button" class="small ghost" id="btnEditTenant">แก้ไขข้อมูลผู้เช่า</button>
@@ -757,7 +780,7 @@
         <div class="list-item">
           <div class="row spread">
             <div class="grow"><strong>${withNick(t.tenantName, t.tenantNick)}</strong>
-              <div class="muted">${thDate(t.moveIn)} – ${t.moveOut ? thDate(t.moveOut) : 'ปัจจุบัน'}${t.note ? ' · ' + esc(t.note) : ''}</div>
+              <div class="muted">${thDate(t.moveIn)} – ${t.moveOut ? thDate(t.moveOut) : 'ปัจจุบัน'} · รวม ${stayLen(t.moveIn, t.moveOut)}${t.note ? ' · ' + esc(t.note) : ''}</div>
               ${t.contractRetainUntil ? `<div class="muted" style="font-size:13px">สัญญา (ระบบสร้าง) เก็บถึง ${thDate(t.contractRetainUntil)}</div>` : ''}</div>
             <div>${pill(t.status)} ${t.contractFileId ? `<button type="button" class="small ghost" data-file="${esc(t.contractFileId)}" data-title="สัญญาเช่า">สัญญา</button>` : ''}</div>
           </div>
@@ -2203,7 +2226,7 @@
         <div class="card" style="margin:0">
           <div class="tenant-head"><span class="avatar">${initial(d.tenancy.tenantName)}</span>
             <div><strong style="font-size:18px">${esc(d.tenancy.tenantName)}</strong><div class="muted">ห้อง ${esc(d.roomId)}</div></div></div>
-          <div class="list-item li" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><span class="ic">${ic('door')}</span><div><div class="muted" style="font-size:13px">ย้ายเข้าเมื่อ</div><strong>${thDate(d.tenancy.moveIn)}</strong></div></div>
+          <div class="list-item li" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><span class="ic">${ic('door')}</span><div><div class="muted" style="font-size:13px">ย้ายเข้าเมื่อ</div><strong>${thDate(d.tenancy.moveIn)}</strong> <span class="muted" style="font-size:14px">· อยู่มาแล้ว ${stayLen(d.tenancy.moveIn)}</span></div></div>
           <div class="list-item li"><span class="ic">${ic('bill')}</span><div><div class="muted" style="font-size:13px">ค่าเช่า</div><strong>${fmt(d.tenancy.rent)} บาท/เดือน</strong></div></div>
           ${d.tenancy.contractFileId ? `<p style="margin-top:14px"><button type="button" class="ghost" data-file="${esc(d.tenancy.contractFileId)}" data-title="สัญญาเช่า">${ic('file')} ดูสัญญาเช่า</button></p>` : ''}
           ${(d.tenancy.signedContracts || []).length ? `<div class="signed"><strong>สัญญาที่เซ็นแล้ว</strong>${signedList(d.tenancy.signedContracts, false)}</div>` : ''}
