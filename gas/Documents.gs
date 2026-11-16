@@ -169,6 +169,43 @@ const RETAIN_YEARS = 10;
 // ---------- สัญญาเช่าต้นแบบจากไฟล์ Word ----------
 
 /**
+ * ฟอนต์ไทยของ Windows (Angsana/Cordia/Browallia/TH Sarabun) ไม่มีใน Google Docs ทำให้ตัวใหญ่และหน้าเพี้ยน
+ * แทนด้วยฟอนต์ Google ที่หน้าตาใกล้เคียง และย่อขนาดตามสัดส่วน (ฟอนต์ตระกูลนี้ตัวเล็กกว่าปกติ ~0.7 เท่า)
+ */
+const THAI_FONT_MAP = {
+  'angsana new': 'Taviraj', 'angsanaupc': 'Taviraj', 'cordia new': 'Sarabun', 'cordiaupc': 'Sarabun',
+  'browallia new': 'Sarabun', 'browalliaupc': 'Sarabun', 'th sarabunpsk': 'Sarabun', 'th sarabun new': 'Sarabun',
+  'th niramit as': 'Niramit', 'th krub': 'Krub', 'th k2d july8': 'K2D',
+};
+function thaiFonts_(el, fallbackFont) {
+  const T = DocumentApp.ElementType;
+  const type = el.getType();
+  if (type === T.TEXT) {
+    const txt = el.asText();
+    const len = txt.getText().length;
+    if (!len) return;
+    const idx = txt.getTextAttributeIndices();
+    for (let i = 0; i < idx.length; i++) {
+      const s = idx[i], e = (i + 1 < idx.length ? idx[i + 1] : len) - 1;
+      if (e < s) continue;
+      const fam = String(txt.getFontFamily(s) || fallbackFont || '').toLowerCase();
+      const to = THAI_FONT_MAP[fam];
+      if (!to) continue;
+      const size = txt.getFontSize(s) || 16;
+      txt.setFontFamily(s, e, to);
+      txt.setFontSize(s, e, Math.max(7, Math.round(size * 0.7 * 2) / 2));
+    }
+    return;
+  }
+  if (type === T.PARAGRAPH || type === T.LIST_ITEM) {
+    try { el.setLineSpacing(1); } catch (err) { /* บางชนิดตั้งไม่ได้ */ }
+  }
+  if (typeof el.getNumChildren === 'function') {
+    for (let i = 0; i < el.getNumChildren(); i++) thaiFonts_(el.getChild(i), fallbackFont);
+  }
+}
+
+/**
  * อัปโหลดสัญญาต้นแบบ (.docx) -> แปลงเป็น Google Docs -> แทนช่องว่างที่พบบ่อยด้วยตัวแทน {{...}}
  * file: {name, data(base64)} ; คืน {url, found:[...], missing:[...]}
  */
@@ -219,6 +256,7 @@ function apiUploadContractTemplate(token, file) {
     el.insertText(sig.getStartOffset(), '({{tenantName}})');
     found.push('ชื่อผู้เช่าใต้ลายเซ็น');
   } else missing.push('ชื่อผู้เช่าใต้ลายเซ็น');
+  thaiFonts_(body);
   doc.saveAndClose();
 
   fsUpdate_(COL.SETTINGS, 'main', { contractTemplateId: id, contractTemplatePrevId: s.contractTemplateId || '' });
