@@ -160,6 +160,7 @@ function apiMoveIn(token, data) {
 
   const tenant = fsSet_(COL.TENANTS, null, {
     name: data.tenant.name,
+    nickname: data.tenant.nickname || '',
     phone: data.tenant.phone || '',
     idCard: data.tenant.idCard || '',
     address: data.tenant.address || '',
@@ -238,7 +239,7 @@ function apiUpdateTenant(token, tenancyId, data) {
   if (!name) throw new Error('กรุณากรอกชื่อผู้เช่า');
   const old = fsGet_(COL.TENANTS, t.tenantId) || {};
   fsUpdate_(COL.TENANTS, t.tenantId, {
-    name: name, phone: data.phone || '', idCard: data.idCard || '', address: data.address || '',
+    name: name, nickname: data.nickname || '', phone: data.phone || '', idCard: data.idCard || '', address: data.address || '',
   });
   const upd = { tenantName: name };
   if (data.rent !== undefined && data.rent !== '') upd.rent = Number(data.rent) || 0;
@@ -247,7 +248,7 @@ function apiUpdateTenant(token, tenancyId, data) {
   fsUpdate_(COL.TENANCIES, tenancyId, upd);
   const changes = [];
   if (old.name !== name) changes.push('ชื่อ ' + (old.name || '-') + ' → ' + name);
-  ['phone', 'idCard', 'address'].forEach(function (k) { if ((old[k] || '') !== (data[k] || '')) changes.push(k); });
+  ['nickname', 'phone', 'idCard', 'address'].forEach(function (k) { if ((old[k] || '') !== (data[k] || '')) changes.push(k); });
   ['rent', 'deposit', 'moveIn'].forEach(function (k) { if (upd[k] !== undefined && String(upd[k]) !== String(t[k])) changes.push(k + ' ' + t[k] + ' → ' + upd[k]); });
   audit_(me, 'แก้ไขข้อมูลผู้เช่า', 'ห้อง ' + t.roomId, changes.join(' · ') || 'ไม่มีการเปลี่ยนแปลง');
   return true;

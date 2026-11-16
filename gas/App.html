@@ -658,6 +658,7 @@
           <div class="li"><span class="ic">${ic('door')}</span><div><div class="muted" style="font-size:13px">ห้องว่าง</div><strong style="font-size:18px">บันทึกย้ายเข้า</strong></div></div>
           <form id="inForm">
             <label>ชื่อ-นามสกุลผู้เช่า *</label><input name="name" required>
+            <label>ชื่อเล่น</label><input name="nickname">
             <div class="grid2">
               <div><label>เบอร์โทร</label><input name="phone" inputmode="tel"></div>
               <div><label>เลขบัตรประชาชน</label><input name="idCard" inputmode="numeric"></div>
@@ -776,6 +777,7 @@
         const b = openModal('แก้ไขข้อมูลผู้เช่า ห้อง ' + roomId, `
           <form id="tnForm">
             <label>ชื่อ-นามสกุล</label><input name="name" value="${esc(tn.name || cur.tenantName)}" required>
+            <label>ชื่อเล่น</label><input name="nickname" value="${esc(tn.nickname || '')}">
             <div class="grid2">
               <div><label>เบอร์โทร</label><input name="phone" value="${esc(tn.phone || '')}" inputmode="tel"></div>
               <div><label>เลขบัตรประชาชน</label><input name="idCard" value="${esc(tn.idCard || '')}" inputmode="numeric"></div>
@@ -829,7 +831,7 @@
         const f = formData(e.target);
         const data = {
           roomId, moveIn: f.moveIn, rent: f.rent, deposit: f.deposit, water: f.water, electric: f.electric,
-          tenant: { name: f.name, phone: f.phone, idCard: f.idCard, address: f.address },
+          tenant: { name: f.name, nickname: f.nickname, phone: f.phone, idCard: f.idCard, address: f.address },
         };
         busy($('button[type=submit]', e.target), async () => {
           const res = await api('apiMoveIn', data);
