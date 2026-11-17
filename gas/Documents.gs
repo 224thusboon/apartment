@@ -39,13 +39,20 @@ function fillPlaceholders_(body, map) {
 }
 
 /** คัดลอกแม่แบบ -> เติมค่า -> export PDF ; คืน {pdfId, docId} */
-function renderTemplate_(templateId, folderId, fileName, map, roomId, tableHook, keepDoc) {
+function renderTemplate_(templateId, folderId, fileName, map, roomId, tableHook, keepDoc, cleanTail) {
   if (!templateId) throw new Error('ยังไม่มีแม่แบบ (รัน setup() ก่อน)');
   const folder = DriveApp.getFolderById(folderId);
   const copy = DriveApp.getFileById(templateId).makeCopy(fileName, folder);
-  const doc = DocumentApp.openById(copy.getId());
-  const body = doc.getBody();
+  let doc = DocumentApp.openById(copy.getId());
+  let body = doc.getBody();
   fillPlaceholders_(body, map);
+  if (cleanTail) {
+    // ตัดตัวแบ่งหน้า/ตัวแบ่งส่วนท้ายเอกสาร (มาจากไฟล์ Word) ก่อนต่อหน้าอื่น ไม่ให้เกิดหน้าว่าง
+    doc.saveAndClose();
+    cleanDocTail_(copy.getId());
+    doc = DocumentApp.openById(copy.getId());
+    body = doc.getBody();
+  }
   if (tableHook) tableHook(body);
   doc.saveAndClose();
   const pdf = folder.createFile(copy.getAs(MimeType.PDF).setName(fileName + '.pdf'));
@@ -72,7 +79,7 @@ function apiGenerateContract(token, tenancyId) {
   };
   const r = renderTemplate_(s.contractTemplateId, s.pdfFolderId,
     'สัญญาเช่า ' + t.roomId + ' ' + tenant.name, map, t.roomId,
-    function (body) { stampOwnerSign_(body, s); const tail = trimTail_(body); attachIdCard_(body, t, tenant, tail); }, true);
+    function (body) { stampOwnerSign_(body, s); const tail = trimTail_(body); attachIdCard_(body, t, tenant, tail); }, true, true);
   // ผูกไฟล์สัญญากับการเข้าพักครั้งนี้ (ผู้เช่าคนถัดไปของห้องเดียวกันเปิดไม่ได้)
   DriveApp.getFileById(r.pdfId).setDescription('room:' + t.roomId + '|tenancy:' + tenancyId);
   const upd = {
@@ -149,11 +156,15 @@ function stampAt_(body, blob, ratio, role, lined) {
  */
 function trimTail_(body) {
   const ET = DocumentApp.ElementType;
+  // ย่อหน้าว่าง = มีแต่ช่องว่างหรือตัวแบ่งหน้า
   const isBlank = function (el) {
     if (el.getType() !== ET.PARAGRAPH) return false;
     const p = el.asParagraph();
     if (p.getText().replace(/\s/g, '')) return false;
-    for (let i = 0; i < p.getNumChildren(); i++) if (p.getChild(i).getType() !== ET.TEXT) return false;
+    for (let i = 0; i < p.getNumChildren(); i++) {
+      const tp = p.getChild(i).getType();
+      if (tp !== ET.TEXT && tp !== ET.PAGE_BREAK) return false;
+    }
     return true;
   };
   let n = body.getNumChildren();
@@ -164,10 +175,45 @@ function trimTail_(body) {
   const last = body.getChild(n - 1);
   if (!isBlank(last)) return null;
   const p = last.asParagraph();
+  for (let i = p.getNumChildren() - 1; i >= 0; i--) {
+    if (p.getChild(i).getType() === ET.PAGE_BREAK) p.removeChild(p.getChild(i));
+  }
   p.setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1);
   const a = {}; a[DocumentApp.Attribute.FONT_SIZE] = 1;
   p.setAttributes(a);
   return p;
+}
+
+/**
+ * ลบของว่างท้ายเอกสารผ่าน Docs API: ย่อหน้าว่าง ตัวแบ่งหน้า และตัวแบ่งส่วน (DocumentApp มองไม่เห็นตัวแบ่งส่วน)
+ * ลบไม่ได้ก็ปล่อยไว้ (ไม่ให้การสร้างสัญญาล้ม)
+ */
+function cleanDocTail_(docId) {
+  const url = 'https://docs.googleapis.com/v1/documents/' + docId;
+  try {
+    const c = (JSON.parse(gFetch_(url + '?fields=body.content', 'get').getContentText()).body || {}).content || [];
+    const blank = function (el) {
+      if (el.sectionBreak) return true;
+      if (!el.paragraph) return false;
+      return (el.paragraph.elements || []).every(function (e) {
+        if (e.pageBreak) return true;
+        if (e.textRun) return !/\S/.test(e.textRun.content || '');
+        return false;
+      });
+    };
+    let i = c.length - 1;
+    while (i > 0 && blank(c[i])) i--;
+    if (i <= 0) return;
+    const from = c[i].endIndex, to = c[c.length - 1].endIndex - 1;
+    if (to <= from) return;
+    try {
+      gFetch_(url + ':batchUpdate', 'post', { requests: [{ deleteContentRange: { range: { startIndex: from, endIndex: to } } }] });
+    } catch (e) {
+      // ลบข้ามตัวแบ่งส่วนไม่ได้: ลบเฉพาะส่วนหลังตัวแบ่งส่วนตัวสุดท้าย
+      const sb = c.filter(function (x) { return x.sectionBreak && x.startIndex; }).pop();
+      if (sb && to > sb.endIndex) gFetch_(url + ':batchUpdate', 'post', { requests: [{ deleteContentRange: { range: { startIndex: sb.endIndex, endIndex: to } } }] });
+    }
+  } catch (e) { Logger.log('cleanDocTail_: ' + e.message); }
 }
 
 /** แนบรูปบัตรประชาชนผู้เช่าเป็นหน้าสุดท้ายของสัญญา พร้อมช่องรับรองสำเนา */
