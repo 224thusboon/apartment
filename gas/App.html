@@ -194,7 +194,7 @@
       w.className = 'ask-wrap';
       w.innerHTML = `<div class="ask card" role="dialog" aria-modal="true">
         <p class="ask-msg">${esc(msg)}</p>
-        ${opt.input ? `<input class="ask-in" value="${esc(opt.value || '')}">` : ''}
+        ${opt.input ? `<input class="ask-in"${opt.password ? ' type="password" autocomplete="off"' : ''} value="${esc(opt.value || '')}">` : ''}
         <div class="row" style="justify-content:flex-end;margin-top:14px">
           <button type="button" class="ghost ask-no">ยกเลิก</button>
           <button type="button" class="ask-ok${opt.danger ? ' danger' : ''}">${esc(opt.ok || 'ตกลง')}</button>
@@ -480,6 +480,229 @@
     if (b) viewFile(b.dataset.file, b.dataset.title, b);
   });
 
+  // ================= ลงนามสัญญาบนระบบ =================
+  const pad2 = (n) => String(n).padStart(2, '0');
+  const thDT = (iso) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return thDate(d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate())) + ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ' น.';
+  };
+
+  // กล่องสถานะลงนามในหน้าห้อง (แอดมิน)
+  const esignBox = (cur) => {
+    const ev = cur.eSign || {};
+    let inner;
+    if (cur.eSignStatus === 'signed') {
+      inner = `<div style="font-size:14px">ลงนามแล้ว ${thDT(ev.signedAt)} · ${ev.mode === 'inperson' ? 'เซ็นต่อหน้า ' + esc(ev.adminName || '') : 'ผู้เช่าเซ็นเองในแอป'} · รหัส ${esc(ev.code || '')}</div>
+        <div class="thumbs"><button type="button" class="small ghost" data-file="${esc(cur.eSignedFileId)}" data-title="สัญญาเช่า (ลงนามแล้ว)">${ic('file')} สัญญาที่ลงนามแล้ว</button>
+          ${ev.photoFileId ? `<button type="button" class="small ghost" data-file="${esc(ev.photoFileId)}" data-title="รูปผู้เช่าขณะลงนาม">${ic('file')} รูปขณะลงนาม</button>` : ''}</div>`;
+    } else if (cur.eSignStatus === 'pending') {
+      inner = `<div class="muted" style="font-size:14px">รอผู้เช่าลงนาม · ผู้เช่าเปิดอ่านและเซ็นได้จากแอปของตัวเอง</div>
+        <p class="row" style="margin:8px 0 0"><button type="button" class="small" id="btnSignHere">ให้ผู้เช่าเซ็นบนเครื่องนี้</button></p>`;
+    } else {
+      inner = '<div class="muted" style="font-size:14px">สัญญานี้สร้างก่อนมีระบบลงนาม กด "สร้างสัญญาใหม่" ถ้าต้องการให้ลงนามบนระบบ</div>';
+    }
+    return `<div class="signed"><div class="row spread"><strong>ลงนามบนระบบ</strong>${cur.eSignStatus === 'signed' ? '<span style="color:var(--accent);font-size:13px;font-weight:600">ลงนามแล้ว</span>' : ''}</div>${inner}</div>`;
+  };
+
+  // แจ้งผู้เช่าเมื่อมีสัญญารอลงนาม
+  const esignCta = (d) => d.tenancy && d.tenancy.eSignStatus === 'pending' ? `
+    <div class="card esign-cta li" style="margin-bottom:16px"><span class="ic">${ic('file')}</span>
+      <div class="grow"><strong>สัญญาเช่ารอคุณลงนาม</strong><div class="muted" style="font-size:14px">อ่านให้ครบทุกหน้า แล้วเซ็นบนมือถือได้เลย</div></div>
+      <button type="button" data-esign>อ่านและลงนาม</button></div>` : '';
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('[data-esign]')) return;
+    signFlow({ roomId: state.roomId, after: () => { state.cache = {}; go(state.tab); } });
+  });
+
+  // ช่องเซ็นชื่อ: คืน {clear, trimmed} (trimmed = PNG ตัดขอบว่าง หรือ null ถ้ายังไม่เซ็น)
+  function makeSigPad(cv) {
+    const cx = cv.getContext('2d');
+    let drawn = false, last = null;
+    const pt = (e) => { const r = cv.getBoundingClientRect(); return { x: (e.clientX - r.left) * cv.width / r.width, y: (e.clientY - r.top) * cv.height / r.height }; };
+    cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); last = pt(e); e.preventDefault(); });
+    cv.addEventListener('pointermove', (e) => {
+      if (!last) return;
+      const p = pt(e);
+      cx.strokeStyle = '#0f2747'; cx.lineWidth = 5; cx.lineCap = 'round'; cx.lineJoin = 'round';
+      cx.beginPath(); cx.moveTo(last.x, last.y);
+      cx.quadraticCurveTo(last.x, last.y, (last.x + p.x) / 2, (last.y + p.y) / 2);
+      cx.lineTo(p.x, p.y); cx.stroke();
+      last = p; drawn = true; e.preventDefault();
+    });
+    const end = () => { last = null; };
+    cv.addEventListener('pointerup', end); cv.addEventListener('pointercancel', end);
+    return {
+      clear: () => { cx.clearRect(0, 0, cv.width, cv.height); drawn = false; },
+      trimmed: () => {
+        if (!drawn) return null;
+        const d = cx.getImageData(0, 0, cv.width, cv.height).data;
+        let x0 = cv.width, y0 = cv.height, x1 = -1, y1 = -1;
+        for (let y = 0; y < cv.height; y++) for (let x = 0; x < cv.width; x++) {
+          if (d[(y * cv.width + x) * 4 + 3] > 20) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+        }
+        if (x1 < 0 || (x1 - x0 < 30 && y1 - y0 < 30)) return null; // จุดเล็กเกินไป ไม่นับเป็นลายเซ็น
+        const pad = 8;
+        x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(cv.width - 1, x1 + pad); y1 = Math.min(cv.height - 1, y1 + pad);
+        const o = document.createElement('canvas');
+        o.width = x1 - x0 + 1; o.height = y1 - y0 + 1;
+        o.getContext('2d').drawImage(cv, x0, y0, o.width, o.height, 0, 0, o.width, o.height);
+        return { data: o.toDataURL('image/png').split(',')[1], w: o.width, h: o.height };
+      },
+    };
+  }
+
+  /**
+   * อ่านแล้วลงนามสัญญา (เต็มจอ)
+   * opt: {tenancyId (แอดมิน), roomId, inPerson (เซ็นต่อหน้าบนเครื่องแอดมิน), after}
+   * เซ็นต่อหน้า: ออกจากหน้านี้ได้ด้วยรหัสผ่านผู้ดูแลเท่านั้น ผู้เช่ายืนยันตัวด้วย PIN ห้อง
+   */
+  async function signFlow(opt) {
+    const ov = document.createElement('div');
+    ov.className = 'esign';
+    ov.innerHTML = `
+      <div class="esign-top">
+        <div class="grow"><strong>สัญญาเช่า ห้อง ${esc(opt.roomId || '')}</strong>
+          <div class="muted" style="font-size:13px" id="esStep">อ่านให้ครบทุกหน้า แล้วจึงลงนามได้</div></div>
+        <button type="button" class="ghost small" id="esClose">${opt.inPerson ? 'ออก (ผู้ดูแล)' : 'ปิด'}</button>
+      </div>
+      <div class="esign-body" id="esBody"><div class="center muted" style="padding:40px 0">กำลังโหลดสัญญา…</div></div>
+      <div class="esign-bar" id="esBar"></div>`;
+    document.body.appendChild(ov);
+    document.body.style.overflow = 'hidden';
+    const body = $('#esBody', ov), bar = $('#esBar', ov);
+    const close = () => { ov.remove(); document.body.style.overflow = ''; };
+    let signed = null;
+    const exit = async () => {
+      if (opt.inPerson) {
+        const pw = await ask('ผู้ดูแล: ใส่รหัสผ่านของคุณเพื่อออกจากหน้าลงนาม', { input: true, password: true, ok: 'ออก' });
+        if (pw == null || pw === '') return false;
+        try { await api('apiCheckMyPassword', pw); } catch (e) { fail(e); return false; }
+      } else if (!signed && !(await ask('ออกจากหน้าลงนาม? ยังไม่ได้ลงนาม', { ok: 'ออก' }))) return false;
+      close();
+      if (opt.after) opt.after();
+      if (signed && !opt.inPerson) viewFile(signed.fileId, 'สัญญาเช่า (ลงนามแล้ว)');
+      return true;
+    };
+    $('#esClose', ov).onclick = exit;
+
+    let doc;
+    try {
+      doc = await api('apiContractToSign', opt.tenancyId || '');
+    } catch (e) { body.innerHTML = `<p class="muted center" style="padding:40px 16px">${esc(e.message)}</p>`; return; }
+    const box = document.createElement('div');
+    box.className = 'esign-pages';
+    body.innerHTML = '';
+    body.appendChild(box);
+    try { await renderPdf(b64bytes(doc.data), box); } catch (e) {
+      box.innerHTML = `<p class="muted center" style="padding:40px 16px">แสดงสัญญาไม่ได้ (${esc(e.message)}) ลองใหม่อีกครั้ง</p>`;
+      return;
+    }
+    const pages = $$('canvas', box);
+    const t0 = Date.now();
+    const seen = new Set();
+    let reachedEnd = false;
+
+    const readStep = () => {
+      ov.classList.remove('signing');
+      $('#esStep', ov).textContent = 'อ่านให้ครบทุกหน้า แล้วจึงลงนามได้';
+      bar.innerHTML = `<div class="muted" id="esProg" style="font-size:13px"></div>
+        <label class="row esign-agree"><input type="checkbox" id="esAgree" disabled style="width:auto;margin-top:3px">
+          <span>ข้าพเจ้าได้อ่านและเข้าใจข้อความในสัญญาฉบับนี้ทั้งหมดแล้ว และยินยอมผูกพันตามสัญญา</span></label>
+        <button type="button" id="esNext" disabled style="width:100%">ถัดไป: ลงนาม</button>`;
+      const upd = () => {
+        const br = body.getBoundingClientRect();
+        pages.forEach((c, i) => { const r = c.getBoundingClientRect(); if (r.top < br.bottom - 40 && r.bottom > br.top + 40) seen.add(i); });
+        if (body.scrollTop + body.clientHeight >= body.scrollHeight - 30) reachedEnd = true;
+        const ok = reachedEnd && seen.size === pages.length;
+        const prog = $('#esProg', ov);
+        if (!prog) return;
+        prog.textContent = ok ? 'อ่านครบทุกหน้าแล้ว' : `อ่านแล้ว ${seen.size} จาก ${pages.length} หน้า · เลื่อนลงให้ถึงท้ายสัญญา`;
+        $('#esAgree', ov).disabled = !ok;
+      };
+      body.onscroll = upd;
+      upd();
+      $('#esAgree', ov).onchange = (e) => { $('#esNext', ov).disabled = !e.target.checked; };
+      $('#esNext', ov).onclick = signStep;
+    };
+
+    const signStep = () => {
+      const readSeconds = Math.round((Date.now() - t0) / 1000);
+      ov.classList.add('signing');
+      $('#esStep', ov).textContent = 'ลงนาม · ' + doc.tenantName;
+      bar.innerHTML = `<div class="esign-in">
+        <label style="margin-top:0">ลายมือชื่อผู้เช่า (${esc(doc.tenantName)}) *</label>
+        <div class="sig-pad"><canvas id="esCv" width="900" height="300"></canvas><span class="sig-line"></span></div>
+        <p class="row" style="margin:6px 0 0"><button type="button" class="ghost small" id="esClr">ล้าง</button><span class="muted" style="font-size:13px">ใช้นิ้วเซ็นในกรอบ</span></p>
+        <label>ถ่ายรูปผู้เช่าถือบัตรประชาชน (ถ่ายตอนนี้) *</label>
+        <input type="file" id="esPhoto" accept="image/\x2a" capture="user">
+        <div class="esign-prev" id="esPrev"></div>
+        ${opt.inPerson ? `<label>PIN ของห้อง ${esc(doc.roomId)} (ให้ผู้เช่าพิมพ์เอง) *</label>
+          <input id="esPin" type="password" inputmode="numeric" autocomplete="off" maxlength="6">` : ''}
+        <p class="row" style="margin-top:16px"><button type="button" class="ghost" id="esBack">กลับไปอ่าน</button>
+          <button type="button" id="esSign" class="grow">ยืนยันลงนาม</button></p>
+        <p class="muted" style="font-size:12px">เมื่อกดยืนยัน ระบบจะใส่ลายเซ็นลงในสัญญา พร้อมหน้าหลักฐานการลงนาม (เวลา อุปกรณ์ รูปถ่าย และรหัสตรวจสอบ) และแก้ไขภายหลังไม่ได้</p>
+      </div>`;
+      const pad = makeSigPad($('#esCv', ov));
+      $('#esClr', ov).onclick = pad.clear;
+      $('#esBack', ov).onclick = () => { readStep(); };
+      let photo = null;
+      $('#esPhoto', ov).onchange = async (e) => {
+        photo = null;
+        const f = e.target.files[0];
+        if (!f || !String(f.type).startsWith('image/')) { $('#esPrev', ov).innerHTML = ''; return; }
+        photo = (await readFiles(e.target, 1280))[0];
+        $('#esPrev', ov).innerHTML = `<img alt="" src="data:${photo.mimeType};base64,${photo.data}">`;
+      };
+      $('#esSign', ov).onclick = (e) => {
+        const sig = pad.trimmed();
+        if (!sig) { toast('กรุณาเซ็นชื่อในกรอบ', true); return; }
+        if (!photo) { toast('กรุณาถ่ายรูปผู้เช่าถือบัตรประชาชน', true); return; }
+        const pin = opt.inPerson ? $('#esPin', ov).value.trim() : '';
+        if (opt.inPerson && !/^[0-9]{6}$/.test(pin)) { toast('ให้ผู้เช่าใส่ PIN 6 หลักของห้อง', true); return; }
+        busy(e.target, async () => {
+          signed = await api('apiSignContract', {
+            tenancyId: doc.tenancyId, agree: true, sig, photo, pin,
+            readSeconds, pages: pages.length, device: navigator.userAgent,
+          });
+          doneStep();
+        });
+      };
+    };
+
+    const doneStep = () => {
+      ov.classList.remove('signing');
+      ov.classList.add('done');
+      $('#esStep', ov).textContent = 'ลงนามแล้ว';
+      bar.innerHTML = `<div class="esign-in center" style="padding:24px 0">
+        <h2 style="margin:0 0 8px">ลงนามเรียบร้อย</h2>
+        <p class="muted">รหัสอ้างอิงเอกสาร ${esc(signed.code)}</p>
+        ${opt.inPerson ? '<p>กรุณาส่งเครื่องคืนผู้ดูแล</p>' : ''}
+        <button type="button" id="esDone">${opt.inPerson ? 'ผู้ดูแล: ใส่รหัสผ่านเพื่อออก' : 'ดูสัญญาที่ลงนามแล้ว'}</button></div>`;
+      $('#esDone', ov).onclick = exit;
+    };
+
+    readStep();
+  }
+
+  // ตรวจสอบไฟล์ PDF กับสัญญาในระบบ (เทียบรหัส SHA-256)
+  async function verifyDocFile(e) {
+    const input = e.target;
+    if (!input.files.length) return;
+    toast('กำลังตรวจสอบ…');
+    try {
+      const f = (await readFiles(input))[0];
+      input.value = '';
+      const r = await api('apiVerifyDocument', f);
+      const who = r.ok ? `ห้อง ${esc(r.roomId)} · ${esc(r.tenantName)}${r.code ? ' · รหัส ' + esc(r.code) : ''}` : '';
+      const msg = !r.ok ? `<h3 style="color:var(--bad);margin-top:0">ไม่ตรงกับเอกสารใดในระบบ</h3><p>ไฟล์นี้อาจถูกแก้ไข หรือไม่ได้ออกจากระบบนี้ (ไฟล์รูป JPEG หรือไฟล์ที่พิมพ์แล้วสแกนกลับ ตรวจด้วยวิธีนี้ไม่ได้)</p>`
+        : r.kind === 'signed' ? `<h3 style="color:var(--accent);margin-top:0">ตรงกับสัญญาที่ลงนามในระบบ</h3><p>${who}</p><p>ลงนามเมื่อ ${thDT(r.signedAt)} · ${r.mode === 'inperson' ? 'เซ็นต่อหน้าผู้ดูแล' : 'ผู้เช่าเซ็นเองในแอป'}</p><p class="muted">ไฟล์ไม่ถูกแก้ไขตั้งแต่ลงนาม</p>`
+        : r.kind === 'superseded' ? `<h3 style="margin-top:0">ตรงกับสัญญาที่เคยลงนาม แต่มีฉบับใหม่กว่าแล้ว</h3><p>${who}</p><p>ลงนามเมื่อ ${thDT(r.signedAt)}</p>`
+        : `<h3 style="margin-top:0">เป็นสัญญาฉบับที่ยังไม่ได้ลงนาม</h3><p>${who}</p><p class="muted">ไฟล์ตรงกับสัญญาที่ระบบสร้าง แต่ไม่มีลายเซ็นผู้เช่า</p>`;
+      openModal('ผลตรวจสอบเอกสาร', `${msg}<p class="muted" style="font-size:12px;word-break:break-all">ไฟล์ ${esc(f.name)} · SHA-256 ${esc(r.hash)}</p>`);
+    } catch (err) { fail(err); }
+  }
+
   // ================= แท็บ =================
   // เมนูเดียวกันแสดง 2 แบบ: แถบบน (คอม) และแท็บล่าง (มือถือ)
   function setTabs(tabs) {
@@ -723,6 +946,7 @@
             <button type="button" class="small ghost" id="btnPin">ออก PIN ใหม่</button>
             <button type="button" class="small danger" id="btnOut">ย้ายออก</button>
           </div>
+          ${cur.contractFileId ? esignBox(cur) : ''}
           <div class="signed">
             <div class="row spread"><strong>รูปบัตรประชาชน</strong>
               <label class="btn small${cur.idCardFileId ? ' ghost' : ''}" style="margin:0;cursor:pointer">${ic('upload')} ${cur.idCardFileId ? 'เปลี่ยนรูป' : 'อัปโหลด'}
@@ -782,7 +1006,8 @@
             <div class="grow"><strong>${withNick(t.tenantName, t.tenantNick)}</strong>
               <div class="muted">${thDate(t.moveIn)} – ${t.moveOut ? thDate(t.moveOut) : 'ปัจจุบัน'} · รวม ${stayLen(t.moveIn, t.moveOut)}${t.note ? ' · ' + esc(t.note) : ''}</div>
               ${t.contractRetainUntil ? `<div class="muted" style="font-size:13px">สัญญา (ระบบสร้าง) เก็บถึง ${thDate(t.contractRetainUntil)}</div>` : ''}</div>
-            <div>${pill(t.status)} ${t.contractFileId ? `<button type="button" class="small ghost" data-file="${esc(t.contractFileId)}" data-title="สัญญาเช่า">สัญญา</button>` : ''}</div>
+            <div>${pill(t.status)} ${t.contractFileId ? `<button type="button" class="small ghost" data-file="${esc(t.contractFileId)}" data-title="สัญญาเช่า">สัญญา</button>` : ''}
+              ${t.eSignedFileId ? `<button type="button" class="small ghost" data-file="${esc(t.eSignedFileId)}" data-title="สัญญาเช่า (ลงนามแล้ว)">ฉบับลงนาม</button>` : ''}</div>
           </div>
           ${t.status !== 'active' && (t.signedContracts || []).length ? signedList(t.signedContracts) : ''}
         </div>`).join('') : '<span class="muted">ยังไม่มีประวัติ</span>'}</div>
@@ -846,18 +1071,25 @@
           openRoom(roomId);
         } catch (err) { fail(err); lbl.classList.remove('disabled'); }
       };
+      const signHere = () => signFlow({ tenancyId: cur.id, roomId, inPerson: true, after: refresh });
       const contractDone = (res) => {
         toast('สร้างสัญญาแล้ว');
-        openModal('สัญญาเช่า', `<p>สร้างสัญญาเรียบร้อย</p>
+        openModal('สัญญาเช่า', `<p>สร้างสัญญาเรียบร้อย ผู้เช่าเปิดอ่านและลงนามได้จากแอปของตัวเอง หรือให้เซ็นบนเครื่องนี้</p>
           <p class="row"><button type="button" data-file="${esc(res.pdfId)}" data-title="สัญญาเช่า">ดู PDF</button>
+          <button type="button" class="ghost" id="signNow">ให้ผู้เช่าเซ็นบนเครื่องนี้</button>
           <a class="btn ghost" href="${esc(res.docUrl)}" target="_blank" rel="noopener">แก้ไขใน Google Docs</a>
-          <button type="button" class="ghost" id="backRoom">กลับไปที่ห้อง</button></p>`);
+          <button type="button" class="ghost" id="backRoom">กลับไปที่ห้อง</button></p>
+          <p class="muted" style="font-size:13px">ถ้าแก้ใน Google Docs ระบบจะออก PDF ใหม่ให้ตรงกันตอนผู้เช่าเปิดอ่าน</p>`);
         $('#backRoom').onclick = () => openRoom(roomId);
+        $('#signNow').onclick = () => { closeModal(); signHere(); };
       };
+      if ($('#btnSignHere', body)) $('#btnSignHere', body).onclick = signHere;
       const needId = () => { toast('อัปโหลดรูปบัตรประชาชนก่อนสร้างสัญญา', true); $('#idFile', body).click(); };
-      $('#btnContract', body).onclick = (e) => {
+      $('#btnContract', body).onclick = async (e) => {
         if (!cur.idCardFileId) { needId(); return; }
-        busy(e.target, async () => contractDone(await api('apiGenerateContract', cur.id)));
+        const btn = e.target;
+        if (cur.eSignStatus === 'signed' && !(await ask('สัญญานี้ผู้เช่าลงนามแล้ว ถ้าสร้างใหม่ต้องให้ผู้เช่าลงนามอีกครั้ง (ฉบับที่ลงนามแล้วยังเก็บไว้) สร้างใหม่ไหม?', { ok: 'สร้างใหม่' }))) return;
+        busy(btn, async () => contractDone(await api('apiGenerateContract', cur.id)));
       };
       $('#idFile', body).onchange = async (e) => {
         const input = e.target;
@@ -1885,12 +2117,14 @@
         <p class="row">
           ${s.invoiceTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https:\/\/docs.google.com/spreadsheets/d/${encodeURIComponent(s.invoiceTemplateId)}/edit">แม่แบบใบแจ้งหนี้</a>` : ''}
           ${s.contractTemplateId ? `<a class="btn ghost" target="_blank" rel="noopener" href="${docUrl(s.contractTemplateId)}">แม่แบบสัญญาเช่า</a>` : ''}
+          <label class="btn ghost" style="margin:0;cursor:pointer">${ic('file')} ตรวจสอบเอกสาร (PDF)<input type="file" id="vfFile" accept="application/pdf" hidden></label>
           <label class="btn ghost" style="margin:0;cursor:pointer">${ic('upload')} อัปโหลดสัญญาต้นแบบ (.docx)<input type="file" id="ctFile" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden></label>
           ${s.rootFolderId ? `<a class="btn ghost" target="_blank" rel="noopener" href="https:\/\/drive.google.com/drive/folders/${encodeURIComponent(s.rootFolderId)}">โฟลเดอร์ Drive</a>` : ''}
         </p>
       </div>
       <div id="sysArea"><div class="center muted">กำลังโหลดข้อมูลระบบ…</div></div>`;
     loadSystemPanel();
+    $('#vfFile').onchange = verifyDocFile;
     $('#ownerSig').onclick = () => signatureForm(() => adminSettings(), {
       title: 'ลายเซ็นผู้ให้เช่า', get: 'apiGetOwnerSignature', save: 'apiSaveOwnerSignature',
       delMsg: 'ลบลายเซ็นผู้ให้เช่า? สัญญาที่สร้างหลังจากนี้จะเว้นเส้นจุดไว้เซ็นมือ' });
@@ -2126,7 +2360,7 @@
     const due = unpaid.filter((i) => i.status === 'unpaid');
     const dueTotal = due.reduce((s, i) => s + Number(i.total || 0), 0);
     const first = due[0];
-    $('#view').innerHTML = `
+    $('#view').innerHTML = `${esignCta(d)}
       <section class="hero">
         <span class="eyebrow">ห้อง ${esc(d.roomId)} · ${esc(d.tenancy.tenantName)}</span>
         ${due.length ? `
@@ -2220,7 +2454,7 @@
   }
   function drawTenantMe(d) {
     state.tenant = d;
-    $('#view').innerHTML = `
+    $('#view').innerHTML = `${esignCta(d)}
       ${sec('ห้องของฉัน')}
       <div class="cols">
         <div class="card" style="margin:0">
@@ -2229,6 +2463,8 @@
           <div class="list-item li" style="margin-top:14px;padding-top:12px;border-top:1px solid var(--line)"><span class="ic">${ic('door')}</span><div><div class="muted" style="font-size:13px">ย้ายเข้าเมื่อ</div><strong>${thDate(d.tenancy.moveIn)}</strong> <span class="muted" style="font-size:14px">· อยู่มาแล้ว ${stayLen(d.tenancy.moveIn)}</span></div></div>
           <div class="list-item li"><span class="ic">${ic('bill')}</span><div><div class="muted" style="font-size:13px">ค่าเช่า</div><strong>${fmt(d.tenancy.rent)} บาท/เดือน</strong></div></div>
           ${d.tenancy.contractFileId ? `<p style="margin-top:14px"><button type="button" class="ghost" data-file="${esc(d.tenancy.contractFileId)}" data-title="สัญญาเช่า">${ic('file')} ดูสัญญาเช่า</button></p>` : ''}
+          ${d.tenancy.eSignedFileId ? `<p><button type="button" data-file="${esc(d.tenancy.eSignedFileId)}" data-title="สัญญาเช่า (ลงนามแล้ว)">${ic('file')} สัญญาที่ลงนามแล้ว</button>
+            <span class="muted" style="font-size:13px">ลงนามเมื่อ ${thDT(d.tenancy.eSignedAt)}</span></p>` : ''}
           ${(d.tenancy.signedContracts || []).length ? `<div class="signed"><strong>สัญญาที่เซ็นแล้ว</strong>${signedList(d.tenancy.signedContracts, false)}</div>` : ''}
         </div>
         <div class="card li" style="margin:0"><span class="ic">${ic('phone')}</span><div class="grow"><div class="muted" style="font-size:13px">ติดต่อผู้ดูแลหอ</div><strong>${esc(d.settings.phone)}</strong></div>

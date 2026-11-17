@@ -91,6 +91,7 @@ function apiTenantHome(token) {
     roomId: s.roomId,
     tenancy: {
       tenantName: t.tenantName, moveIn: t.moveIn, rent: t.rent, contractFileId: t.contractFileId || '',
+      eSignStatus: t.eSignStatus || '', eSignedFileId: t.eSignedFileId || '', eSignedAt: (t.eSign && t.eSign.signedAt) || '',
       signedContracts: (t.signedContracts || []).map(function (c) { return { fileId: c.fileId, name: c.name, uploadedAt: c.uploadedAt }; }),
     },
     invoices: invoices,

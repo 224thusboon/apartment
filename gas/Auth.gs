@@ -153,6 +153,22 @@ function apiWhoAmI(token) {
   return { role: s.role, roomId: s.roomId, name: s.name || '', master: s.adminId === 'master' };
 }
 
+/** ตรวจรหัสผ่านของผู้ดูแลที่ล็อกอินอยู่ (ปลดล็อกหน้าจอเซ็นต่อหน้า) */
+function apiCheckMyPassword(token, pw) {
+  const me = requireSession_(token, 'admin');
+  const lockKey = 'admin_' + (me.email || 'master');
+  checkLock_(lockKey);
+  let ok;
+  if (me.adminId === 'master') ok = !!prop_('ADMIN_PASSWORD') && String(pw || '') === prop_('ADMIN_PASSWORD');
+  else {
+    const a = fsGet_(COL.ADMINS, me.adminId);
+    ok = !!a && a.passHash === pwHash_(a.salt, String(pw || ''));
+  }
+  if (!ok) throw new Error('รหัสผ่านไม่ถูกต้อง (' + loginFailed_(lockKey) + ')');
+  clearFail_(lockKey);
+  return true;
+}
+
 function randomPin_() {
   let p = '';
   for (let i = 0; i < 6; i++) p += Math.floor(Math.random() * 10);

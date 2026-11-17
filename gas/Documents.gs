@@ -75,10 +75,18 @@ function apiGenerateContract(token, tenancyId) {
     function (body) { stampOwnerSign_(body, s); const tail = trimTail_(body); attachIdCard_(body, t, tenant, tail); }, true);
   // ผูกไฟล์สัญญากับการเข้าพักครั้งนี้ (ผู้เช่าคนถัดไปของห้องเดียวกันเปิดไม่ได้)
   DriveApp.getFileById(r.pdfId).setDescription('room:' + t.roomId + '|tenancy:' + tenancyId);
-  fsUpdate_(COL.TENANCIES, tenancyId, {
+  const upd = {
     contractFileId: r.pdfId, contractDocId: r.docId,
     contractCreatedAt: today_(), contractRetainUntil: t.moveOut ? retainUntil_(t.moveOut) : '',
-  });
+    contractCreatedBy: me.name || me.email || '',
+    contractHash: bytesHash_(DriveApp.getFileById(r.pdfId).getBlob().getBytes()),
+    // สัญญาฉบับใหม่ต้องลงนามใหม่ (ฉบับที่ลงนามแล้วก่อนหน้า เก็บไว้ในประวัติ)
+    eSignStatus: 'pending', eSignCode: signCode_(), eSignedFileId: '', eSignedHash: '', eSign: {},
+  };
+  if (t.eSignedFileId) {
+    upd.eSignHistory = (t.eSignHistory || []).concat([{ fileId: t.eSignedFileId, hash: t.eSignedHash || '', at: (t.eSign && t.eSign.signedAt) || '', code: t.eSignCode || '' }]);
+  }
+  fsUpdate_(COL.TENANCIES, tenancyId, upd);
   audit_(me, 'สร้างสัญญาเช่า', 'ห้อง ' + t.roomId, tenant.name || '');
   return { pdfId: r.pdfId, docUrl: 'https://docs.google.com/document/d/' + r.docId + '/edit' };
 }
@@ -91,10 +99,14 @@ function stampOwnerSign_(body, s) {
   if (!s.ownerSignatureFileId) return 0;
   let blob;
   try { blob = DriveApp.getFileById(s.ownerSignatureFileId).getBlob(); } catch (e) { return 0; }
-  const ratio = (Number(s.ownerSignatureW) || 3) / (Number(s.ownerSignatureH) || 1);
+  return stampAt_(body, blob, (Number(s.ownerSignatureW) || 3) / (Number(s.ownerSignatureH) || 1), 'ผู้ให้เช่า');
+}
+
+/** วางรูปลายเซ็นแทนเส้นจุดในบรรทัด "ลงชื่อ....... <role>" ทุกจุดที่พบ (สูงสุด 5) */
+function stampAt_(body, blob, ratio, role) {
   let h = 34, w = h * ratio;
   if (w > 150) { w = 150; h = w / ratio; }
-  const PAT = 'ลงชื่อ\\s*[\\.…_]{3,}\\s*ผู้ให้เช่า';
+  const PAT = 'ลงชื่อ\\s*[\\.…_]{3,}\\s*' + role;
   let n = 0, f;
   while (n < 5 && (f = body.findText(PAT))) {
     const el = f.getElement().asText();
@@ -224,6 +236,203 @@ function apiSaveOwnerSignature(token, sig) {
   clearSettingsCache_();
   audit_(me, 'ตั้งลายเซ็นผู้ให้เช่า', s.ownerName || '', '');
   return true;
+}
+
+// ---------- ลงนามสัญญาบนระบบ ----------
+
+function bytesHash_(bytes) {
+  return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)
+    .map(function (b) { return ('0' + (b & 0xff).toString(16)).slice(-2); }).join('');
+}
+
+/** รหัสอ้างอิงเอกสาร 10 ตัว (ไม่มีตัวที่สับสนง่าย เช่น O/0, I/1) */
+function signCode_() {
+  const A = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c = '';
+  for (let i = 0; i < 10; i++) c += A.charAt(Math.floor(Math.random() * A.length));
+  return c.slice(0, 5) + '-' + c.slice(5);
+}
+
+/** ผู้เช่าใช้การเข้าพักของตัวเอง ผู้ดูแลระบุ tenancyId (เซ็นต่อหน้าบนเครื่องผู้ดูแล) */
+function signTarget_(token, tenancyId) {
+  const s = requireSession_(token);
+  const tid = s.role === 'tenant' ? s.tenancyId : tenancyId;
+  const t = tid ? fsGet_(COL.TENANCIES, tid) : null;
+  if (!t || t.status !== 'active') throw new Error('ไม่พบการเข้าพักที่ยังอยู่');
+  return { s: s, t: t };
+}
+
+/**
+ * เปิดสัญญาเพื่ออ่านก่อนลงนาม: ส่ง PDF ฉบับล่าสุด (ถ้า Docs ถูกแก้หลังออก PDF จะออก PDF ใหม่ให้ตรงกัน)
+ * บันทึกเวลาที่เปิดอ่าน (เวลาเซิร์ฟเวอร์) ไว้ใช้ในหน้าหลักฐาน
+ */
+function apiContractToSign(token, tenancyId) {
+  const x = signTarget_(token, tenancyId), t = x.t;
+  if (t.eSignStatus !== 'pending' || !t.contractDocId) throw new Error('ไม่มีสัญญาที่รอลงนาม');
+  const s = getSettings_();
+  const docFile = DriveApp.getFileById(t.contractDocId);
+  let pdfId = t.contractFileId;
+  let pdf = DriveApp.getFileById(pdfId);
+  // แก้ไขใน Google Docs หลังจากออก PDF: ออก PDF ใหม่จาก Docs ปัจจุบัน
+  if (docFile.getLastUpdated().getTime() > pdf.getDateCreated().getTime() + 60000) {
+    const np = DriveApp.getFolderById(s.pdfFolderId).createFile(docFile.getAs(MimeType.PDF).setName(docFile.getName() + '.pdf'));
+    np.setDescription('room:' + t.roomId + '|tenancy:' + t.id);
+    pdfId = np.getId();
+    pdf = np;
+    fsUpdate_(COL.TENANCIES, t.id, { contractFileId: pdfId, contractHash: bytesHash_(np.getBlob().getBytes()) });
+  }
+  const bytes = pdf.getBlob().getBytes();
+  const hash = bytesHash_(bytes);
+  CacheService.getScriptCache().put('esopen_' + t.id, JSON.stringify({
+    at: new Date().toISOString(), hash: hash, docAt: docFile.getLastUpdated().getTime(), pdfId: pdfId,
+  }), 21600);
+  return {
+    tenancyId: t.id, roomId: t.roomId, tenantName: t.tenantName, code: t.eSignCode || '',
+    data: Utilities.base64Encode(bytes),
+  };
+}
+
+/**
+ * ลงนามสัญญา
+ * p: {tenancyId (ผู้ดูแล), agree, sig:{data,w,h}, photo:{name,mimeType,data}, pin (ผู้ดูแล), readSeconds, pages, device}
+ */
+function apiSignContract(token, p) {
+  p = p || {};
+  const x = signTarget_(token, p.tenancyId), me = x.s, t = x.t;
+  const inPerson = me.role === 'admin';
+  if (t.eSignStatus !== 'pending' || !t.contractDocId) throw new Error('ไม่มีสัญญาที่รอลงนาม');
+  if (p.agree !== true) throw new Error('ต้องยืนยันว่าอ่านและยอมรับสัญญาก่อน');
+  if (inPerson) {
+    // ผู้เช่ายืนยันตัวด้วย PIN ของห้อง (ผู้ดูแลไม่ควรรู้ PIN นี้)
+    const lockKey = 'sign_' + t.roomId;
+    checkLock_(lockKey);
+    if (!t.pinHash || t.pinHash !== hash_(t.roomId + ':' + String(p.pin || '').trim())) {
+      throw new Error('PIN ไม่ถูกต้อง (' + loginFailed_(lockKey) + ')');
+    }
+    clearFail_(lockKey);
+  }
+  const cache = CacheService.getScriptCache();
+  const open = JSON.parse(cache.get('esopen_' + t.id) || 'null');
+  if (!open) throw new Error('หมดเวลา กรุณาเปิดอ่านสัญญาใหม่อีกครั้ง');
+  const docFile = DriveApp.getFileById(t.contractDocId);
+  if (docFile.getLastUpdated().getTime() !== open.docAt) throw new Error('สัญญาถูกแก้ไขระหว่างที่อ่าน กรุณาเปิดอ่านใหม่');
+
+  const sigBytes = Utilities.base64Decode((p.sig && p.sig.data) || '');
+  if (!sigBytes.length || sigBytes.length > 400 * 1024) throw new Error('กรุณาเซ็นชื่อในกรอบ');
+  if (!p.photo || !/^image\//.test(p.photo.mimeType || '')) throw new Error('กรุณาถ่ายรูปผู้เช่าคู่บัตรประชาชน');
+
+  const s = getSettings_();
+  const stamp = Utilities.formatDate(new Date(), 'Asia/Bangkok', 'yyyyMMdd-HHmmss');
+  const sigFile = DriveApp.getFolderById(signFolder_()).createFile(Utilities.newBlob(sigBytes, 'image/png', 'signature_tenant_' + t.roomId + '_' + stamp + '.png'));
+  sigFile.setDescription('room:' + t.roomId + '|tenancy:' + t.id);
+  const photoId = saveUpload_(idFolder_(), p.photo, t.roomId, 'sign_photo', { tenancyId: t.id, maxMB: 8 });
+
+  const signedAt = new Date();
+  const fmtTh = function (d) {
+    return thaiDate_(Utilities.formatDate(d, 'Asia/Bangkok', 'yyyy-MM-dd')) + ' เวลา ' + Utilities.formatDate(d, 'Asia/Bangkok', 'HH:mm:ss') + ' น.';
+  };
+  const ev = {
+    code: t.eSignCode || '', mode: inPerson ? 'inperson' : 'self',
+    adminName: inPerson ? (me.name || me.email || '') : '',
+    openedAt: open.at, signedAt: signedAt.toISOString(),
+    readSeconds: Math.max(0, Math.round(Number(p.readSeconds) || 0)), pages: Number(p.pages) || 0,
+    device: String(p.device || '').slice(0, 200), contractHash: open.hash,
+    sigFileId: sigFile.getId(), photoFileId: photoId,
+  };
+
+  // สำเนา Docs -> วางลายเซ็นผู้เช่า -> หน้าหลักฐาน -> PDF
+  const copy = docFile.makeCopy('สัญญาเช่า (ลงนามแล้ว) ' + t.roomId + ' ' + t.tenantName, DriveApp.getFolderById(s.pdfFolderId));
+  let out;
+  try {
+    const doc = DocumentApp.openById(copy.getId());
+    const body = doc.getBody();
+    const sigBlob = Utilities.newBlob(sigBytes, 'image/png', 'sig.png');
+    stampAt_(body, sigBlob, (Number(p.sig.w) || 3) / (Number(p.sig.h) || 1), 'ผู้เช่า');
+    const tail = trimTail_(body);
+    if (tail) tail.appendPageBreak(); else body.appendPageBreak();
+    evidencePage_(body, t, ev, fmtTh, sigBlob, DriveApp.getFileById(photoId).getBlob());
+    doc.saveAndClose();
+    out = DriveApp.getFolderById(signedFolder_()).createFile(copy.getAs(MimeType.PDF).setName('สัญญาเช่า (ลงนามแล้ว) ' + t.roomId + ' ' + ev.code + '.pdf'));
+    out.setDescription('room:' + t.roomId + '|tenancy:' + t.id);
+  } finally {
+    copy.setTrashed(true);
+  }
+  const finalHash = bytesHash_(out.getBlob().getBytes());
+  fsUpdate_(COL.TENANCIES, t.id, { eSignStatus: 'signed', eSignedFileId: out.getId(), eSignedHash: finalHash, eSign: ev });
+  cache.remove('esopen_' + t.id);
+  audit_(me, inPerson ? 'ผู้เช่าลงนามสัญญาต่อหน้าผู้ดูแล' : 'ผู้เช่าลงนามสัญญาบนระบบ',
+    'ห้อง ' + t.roomId + ' · ' + t.tenantName, 'รหัส ' + ev.code + ' · SHA-256 ' + finalHash.slice(0, 16) + '…');
+  return { fileId: out.getId(), code: ev.code, hash: finalHash };
+}
+
+/** หน้าหลักฐานการลงนามอิเล็กทรอนิกส์ (ต่อท้ายสัญญา) */
+function evidencePage_(body, t, ev, fmtTh, sigBlob, photoBlob) {
+  const C = DocumentApp.HorizontalAlignment.CENTER;
+  const st = function (el, size, bold) { el.editAsText().setFontFamily('Sarabun').setFontSize(size).setBold(!!bold); return el; };
+  st(body.appendParagraph('หลักฐานการลงนามสัญญาเช่าด้วยวิธีการทางอิเล็กทรอนิกส์').setAlignment(C), 14, true);
+  st(body.appendParagraph('ตามพระราชบัญญัติว่าด้วยธุรกรรมทางอิเล็กทรอนิกส์ พ.ศ. 2544').setAlignment(C), 10, false);
+  const mins = Math.floor(ev.readSeconds / 60), secs = ev.readSeconds % 60;
+  const rows = [
+    ['รหัสอ้างอิงเอกสาร', ev.code || '-'],
+    ['ห้อง / ผู้เช่า', t.roomId + ' / ' + t.tenantName],
+    ['สัญญาสร้างโดย', (t.contractCreatedBy || '-') + (t.contractCreatedAt ? ' เมื่อ ' + thaiDate_(t.contractCreatedAt) : '')],
+    ['วิธีลงนาม', ev.mode === 'inperson'
+      ? 'ลงนามต่อหน้าผู้ดูแล (' + ev.adminName + ') บนอุปกรณ์ของผู้ดูแล ผู้เช่ายืนยันตัวตนด้วย PIN ของห้อง'
+      : 'ผู้เช่าลงนามด้วยอุปกรณ์ของตนเอง หลังเข้าสู่ระบบด้วยเลขห้องและ PIN'],
+    ['เปิดอ่านสัญญาเมื่อ', fmtTh(new Date(ev.openedAt))],
+    ['ลงนามเมื่อ', fmtTh(new Date(ev.signedAt))],
+    ['การอ่าน', 'เลื่อนอ่านครบ ' + ev.pages + ' หน้า ใช้เวลา ' + (mins ? mins + ' นาที ' : '') + secs + ' วินาที (ตามที่อุปกรณ์รายงาน) และยืนยันว่าได้อ่านและยอมรับข้อความทั้งหมดแล้ว'],
+    ['อุปกรณ์ที่ใช้ลงนาม', ev.device || '-'],
+    ['รหัสตรวจสอบสัญญาที่อ่าน (SHA-256)', ev.contractHash],
+  ];
+  const tb = body.appendTable(rows);
+  tb.setBorderColor('#9aa5b1');
+  for (let r = 0; r < tb.getNumRows(); r++) {
+    const row = tb.getRow(r);
+    st(row.getCell(0).setWidth(150), 10, true);
+    st(row.getCell(1), 10, false);
+  }
+  const imgs = body.appendTable([['รูปผู้เช่าคู่บัตรประชาชน ขณะลงนาม', 'ลายมือชื่อผู้เช่า'], [' ', ' ']]);
+  imgs.setBorderColor('#9aa5b1');
+  st(imgs.getRow(0).getCell(0), 10, true);
+  st(imgs.getRow(0).getCell(1), 10, true);
+  const put = function (cell, blob, maxW, maxH) {
+    const im = cell.getChild(0).asParagraph().setAlignment(C).appendInlineImage(blob);
+    const w = im.getWidth(), h = im.getHeight();
+    let nw = Math.min(maxW, w), nh = h * nw / w;
+    if (nh > maxH) { nh = maxH; nw = w * nh / h; }
+    im.setWidth(Math.round(nw)).setHeight(Math.round(nh));
+  };
+  try { put(imgs.getRow(1).getCell(0), photoBlob, 200, 220); } catch (e) { /* รูปเปิดไม่ได้ */ }
+  put(imgs.getRow(1).getCell(1), sigBlob.copyBlob(), 200, 90);
+  st(body.appendParagraph('การตรวจสอบ: ระบบบันทึกรหัส SHA-256 ของไฟล์ PDF ฉบับนี้ไว้ ณ เวลาลงนาม นำไฟล์มาตรวจได้ที่เมนู "ตรวจสอบเอกสาร" ในระบบ หากไฟล์ถูกแก้ไขแม้เพียงเล็กน้อย รหัสจะไม่ตรง และระบบจะแจ้งว่าไม่ใช่ฉบับที่ลงนาม'), 9, false);
+}
+
+/** ตรวจไฟล์ PDF ว่าตรงกับสัญญาในระบบหรือไม่ (เทียบ SHA-256) */
+function apiVerifyDocument(token, upload) {
+  const me = requireSession_(token, 'admin');
+  if (!upload || !upload.data) throw new Error('กรุณาเลือกไฟล์');
+  const h = bytesHash_(Utilities.base64Decode(upload.data));
+  const pick = function (t) { return { roomId: t.roomId, tenantName: t.tenantName, code: t.eSignCode || '', status: t.status }; };
+  let res;
+  let hit = fsWhere_(COL.TENANCIES, { eSignedHash: h })[0];
+  if (hit) {
+    res = Object.assign(pick(hit), { ok: true, kind: 'signed', signedAt: (hit.eSign && hit.eSign.signedAt) || '', mode: (hit.eSign && hit.eSign.mode) || '' });
+  } else {
+    hit = fsList_(COL.TENANCIES).filter(function (t) {
+      return (t.eSignHistory || []).some(function (x) { return x.hash === h; });
+    })[0];
+    if (hit) {
+      const old = hit.eSignHistory.filter(function (x) { return x.hash === h; })[0];
+      res = Object.assign(pick(hit), { ok: true, kind: 'superseded', signedAt: old.at, code: old.code });
+    } else {
+      hit = fsWhere_(COL.TENANCIES, { contractHash: h })[0];
+      res = hit ? Object.assign(pick(hit), { ok: true, kind: 'unsigned' }) : { ok: false };
+    }
+  }
+  audit_(me, 'ตรวจสอบเอกสาร', upload.name || '', res.ok ? res.kind + ' ' + (res.code || '') : 'ไม่ตรงกับเอกสารในระบบ');
+  res.hash = h;
+  return res;
 }
 
 // ---------- ไฟล์ ----------
