@@ -99,13 +99,16 @@ function stampOwnerSign_(body, s) {
   if (!s.ownerSignatureFileId) return 0;
   let blob;
   try { blob = DriveApp.getFileById(s.ownerSignatureFileId).getBlob(); } catch (e) { return 0; }
-  return stampAt_(body, blob, (Number(s.ownerSignatureW) || 3) / (Number(s.ownerSignatureH) || 1), 'ผู้ให้เช่า');
+  return stampAt_(body, blob, (Number(s.ownerSignatureW) || 3) / (Number(s.ownerSignatureH) || 1), 'ผู้ให้เช่า', !!s.ownerSignatureLined);
 }
 
-/** วางรูปลายเซ็นแทนเส้นจุดในบรรทัด "ลงชื่อ....... <role>" ทุกจุดที่พบ (สูงสุด 5) */
-function stampAt_(body, blob, ratio, role) {
-  let h = 34, w = h * ratio;
-  if (w > 150) { w = 150; h = w / ratio; }
+/**
+ * วางรูปลายเซ็นแทนเส้นจุดในบรรทัด "ลงชื่อ....... <role>" ทุกจุดที่พบ (สูงสุด 5)
+ * lined = รูปมีเส้นจุดวาดไว้ที่ขอบล่างแล้ว (ทำจากแอป) : กว้างเท่าเส้นจุดเดิม เส้นจุดจึงยังอยู่ ลายเซ็นทับบนเส้น
+ */
+function stampAt_(body, blob, ratio, role, lined) {
+  let h0 = 34, w0 = h0 * ratio;
+  if (w0 > 150) { w0 = 150; h0 = w0 / ratio; }
   const PAT = 'ลงชื่อ\\s*[\\.…_]{3,}\\s*' + role;
   let n = 0, f;
   while (n < 5 && (f = body.findText(PAT))) {
@@ -116,6 +119,14 @@ function stampAt_(body, blob, ratio, role) {
     const s0 = f.getStartOffset() + m.index, e0 = s0 + m[0].length - 1;
     const tail = full.slice(e0 + 1);
     const fmt = { font: el.getFontFamily(s0), size: el.getFontSize(s0), bold: el.isBold(s0), color: el.getForegroundColor(s0) };
+    let w = w0, h = h0;
+    if (lined) {
+      // ความกว้างของเส้นจุดเดิมโดยประมาณ (. ≈ 0.25em, _ ≈ 0.5em, … ≈ 1em)
+      const em = Number(fmt.size) || 14;
+      const dots = m[0].split('').reduce(function (a, ch) { return a + (ch === '…' ? 1 : ch === '_' ? 0.5 : 0.25); }, 0);
+      w = Math.max(100, Math.min(240, dots * em));
+      h = w / ratio;
+    }
     el.deleteText(s0, full.length - 1);
     const par = el.getParent();
     const idx = par.getChildIndex(el);
@@ -232,7 +243,7 @@ function apiSaveOwnerSignature(token, sig) {
   if (!bytes.length || bytes.length > 400 * 1024) throw new Error('ไฟล์ลายเซ็นไม่ถูกต้องหรือใหญ่เกินไป');
   const f = DriveApp.getFolderById(signFolder_()).createFile(Utilities.newBlob(bytes, 'image/png', 'signature_owner.png'));
   f.setDescription('signature:owner');
-  fsUpdate_(COL.SETTINGS, 'main', { ownerSignatureFileId: f.getId(), ownerSignatureW: Number(sig.w) || 0, ownerSignatureH: Number(sig.h) || 0 });
+  fsUpdate_(COL.SETTINGS, 'main', { ownerSignatureFileId: f.getId(), ownerSignatureW: Number(sig.w) || 0, ownerSignatureH: Number(sig.h) || 0, ownerSignatureLined: !!sig.lined });
   clearSettingsCache_();
   audit_(me, 'ตั้งลายเซ็นผู้ให้เช่า', s.ownerName || '', '');
   return true;
@@ -347,7 +358,10 @@ function apiSignContract(token, p) {
     const doc = DocumentApp.openById(copy.getId());
     const body = doc.getBody();
     const sigBlob = Utilities.newBlob(sigBytes, 'image/png', 'sig.png');
-    stampAt_(body, sigBlob, (Number(p.sig.w) || 3) / (Number(p.sig.h) || 1), 'ผู้เช่า');
+    if (p.sigLine && p.sigLine.data) {
+      stampAt_(body, Utilities.newBlob(Utilities.base64Decode(p.sigLine.data), 'image/png', 'sigline.png'),
+        (Number(p.sigLine.w) || 4) / (Number(p.sigLine.h) || 1), 'ผู้เช่า', true);
+    } else stampAt_(body, sigBlob, (Number(p.sig.w) || 3) / (Number(p.sig.h) || 1), 'ผู้เช่า');
     const tail = trimTail_(body);
     if (tail) tail.appendPageBreak(); else body.appendPageBreak();
     evidencePage_(body, t, ev, fmtTh, sigBlob, DriveApp.getFileById(photoId).getBlob());

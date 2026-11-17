@@ -364,46 +364,34 @@
     return res;
   }
 
-  // แปลง PDF เป็นรูป JPEG ไฟล์เดียว (หลายหน้าต่อกันแนวตั้ง) แล้วบันทึกลงเครื่อง
+  // แปลง PDF เป็นรูป JPEG หน้าละไฟล์ (เอกสารหลายหน้าได้หลายไฟล์ ชื่อต่อท้าย _หน้า1, _หน้า2 …)
   async function pdfToJpeg(bytes, name) {
     const lib = await loadPdfJs();
     const pdf = await lib.getDocument({ data: bytes, cMapUrl: PDFJS + 'cmaps/', cMapPacked: true }).promise;
-    const pages = [];
+    const base = String(name || 'เอกสาร').replace(/\.pdf$/i, '');
     for (let n = 1; n <= pdf.numPages; n++) {
       const page = await pdf.getPage(n);
-      pages.push({ page, vp1: page.getViewport({ scale: 1 }) });
+      const vp = page.getViewport({ scale: 2.5 });
+      const c = document.createElement('canvas');
+      c.width = Math.floor(vp.width);
+      c.height = Math.floor(vp.height);
+      const cx = c.getContext('2d');
+      cx.fillStyle = '#fff';
+      cx.fillRect(0, 0, c.width, c.height);
+      await page.render({ canvasContext: cx, viewport: vp }).promise;
+      const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.9));
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = base + (pdf.numPages > 1 ? '_หน้า' + n : '') + '.jpg';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+      // เว้นจังหวะ เบราว์เซอร์จะได้ไม่ตัดไฟล์ที่ดาวน์โหลดติดกัน
+      if (n < pdf.numPages) await new Promise((ok) => setTimeout(ok, 500));
     }
-    const GAP = 12;
-    const totalH = pages.reduce((s, p) => s + p.vp1.height, 0);
-    const scale = Math.min(2.5, (16000 - GAP * pages.length) / totalH);
-    const c = document.createElement('canvas');
-    c.width = Math.floor(Math.max(...pages.map((p) => p.vp1.width)) * scale);
-    c.height = Math.floor(totalH * scale) + GAP * (pages.length - 1);
-    const cx = c.getContext('2d');
-    cx.fillStyle = '#d0d0d0';
-    cx.fillRect(0, 0, c.width, c.height);
-    let y = 0;
-    for (const p of pages) {
-      const vp = p.page.getViewport({ scale });
-      const pc = document.createElement('canvas');
-      pc.width = Math.floor(vp.width);
-      pc.height = Math.floor(vp.height);
-      const pcx = pc.getContext('2d');
-      pcx.fillStyle = '#fff';
-      pcx.fillRect(0, 0, pc.width, pc.height);
-      await p.page.render({ canvasContext: pcx, viewport: vp }).promise;
-      cx.drawImage(pc, 0, y);
-      y += pc.height + GAP;
-    }
-    const blob = await new Promise((ok) => c.toBlob(ok, 'image/jpeg', 0.9));
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = String(name || 'เอกสาร').replace(/\.pdf$/i, '') + '.jpg';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 60000);
+    return pdf.numPages;
   }
 
   async function viewFile(fileId, title, src, preload) {
@@ -430,7 +418,7 @@
         jb.disabled = true;
         const old = jb.innerHTML;
         jb.textContent = 'กำลังแปลงเป็น JPEG…';
-        try { await pdfToJpeg(bytes.slice(), f.name); } catch (err) { toast('แปลงไม่ได้: ' + err.message, true); }
+        try { const n = await pdfToJpeg(bytes.slice(), f.name); if (n > 1) toast(`ดาวน์โหลดแล้ว ${n} รูป (หน้าละรูป)`); } catch (err) { toast('แปลงไม่ได้: ' + err.message, true); }
         jb.disabled = false; jb.innerHTML = old;
       };
       if (asAdminReceipt) {
@@ -513,6 +501,25 @@
   document.addEventListener('click', (e) => {
     if (!e.target.closest('[data-esign]')) return;
     signFlow({ roomId: state.roomId, after: () => { state.cache = {}; go(state.tab); } });
+  });
+
+  // ลายเซ็นทับเส้นจุด: วาดเส้นจุดที่ขอบล่าง แล้ววางลายเซ็นให้ปลายล่างแตะเส้น (ใช้แทนเส้นจุดในสัญญา)
+  const linedSig = (sig) => new Promise((ok, bad) => {
+    const im = new Image();
+    im.onload = () => {
+      const W = 800, H = 200, base = 194;
+      const c = document.createElement('canvas');
+      c.width = W; c.height = H;
+      const cx = c.getContext('2d');
+      cx.fillStyle = '#000';
+      for (let x = 6; x < W; x += 16) { cx.beginPath(); cx.arc(x, base, 3, 0, Math.PI * 2); cx.fill(); }
+      const s = Math.min((W - 40) / im.width, (base - 2) / im.height);
+      const w = im.width * s, h = im.height * s;
+      cx.drawImage(im, (W - w) / 2, Math.min(H - h, base + 4 - h), w, h);
+      ok({ data: c.toDataURL('image/png').split(',')[1], w: W, h: H, lined: true });
+    };
+    im.onerror = () => bad(new Error('ทำรูปลายเซ็นไม่ได้'));
+    im.src = 'data:image/png;base64,' + sig.data;
   });
 
   // ช่องเซ็นชื่อ: คืน {clear, trimmed} (trimmed = PNG ตัดขอบว่าง หรือ null ถ้ายังไม่เซ็น)
@@ -661,8 +668,9 @@
         const pin = opt.inPerson ? $('#esPin', ov).value.trim() : '';
         if (opt.inPerson && !/^[0-9]{6}$/.test(pin)) { toast('ให้ผู้เช่าใส่ PIN 6 หลักของห้อง', true); return; }
         busy(e.target, async () => {
+          const sigLine = await linedSig(sig);
           signed = await api('apiSignContract', {
-            tenancyId: doc.tenancyId, agree: true, sig, photo, pin,
+            tenancyId: doc.tenancyId, agree: true, sig, sigLine, photo, pin,
             readSeconds, pages: pages.length, device: navigator.userAgent,
           });
           doneStep();
@@ -1669,9 +1677,9 @@
       return { data: o.toDataURL('image/png').split(',')[1], w: o.width, h: o.height };
     };
     $('#sigSave', b).onclick = (e) => {
-      const sig = drawn ? trimmed() : null;
+      let sig = drawn ? trimmed() : null;
       if (!sig) { toast('กรุณาเซ็นหรืออัปโหลดรูปก่อน', true); return; }
-      busy(e.target, async () => { await api(opt.save, sig); toast('บันทึกลายเซ็นแล้ว'); closeModal(); if (after) after(); });
+      busy(e.target, async () => { if (opt.lined) sig = await linedSig(sig); await api(opt.save, sig); toast('บันทึกลายเซ็นแล้ว'); closeModal(); if (after) after(); });
     };
     $('#sigDel', b).onclick = async (e) => {
       const btn = e.target;
@@ -2126,7 +2134,7 @@
     loadSystemPanel();
     $('#vfFile').onchange = verifyDocFile;
     $('#ownerSig').onclick = () => signatureForm(() => adminSettings(), {
-      title: 'ลายเซ็นผู้ให้เช่า', get: 'apiGetOwnerSignature', save: 'apiSaveOwnerSignature',
+      title: 'ลายเซ็นผู้ให้เช่า', get: 'apiGetOwnerSignature', save: 'apiSaveOwnerSignature', lined: true,
       delMsg: 'ลบลายเซ็นผู้ให้เช่า? สัญญาที่สร้างหลังจากนี้จะเว้นเส้นจุดไว้เซ็นมือ' });
     // อัปโหลดสัญญาต้นแบบ .docx -> แปลงเป็น Google Docs และใส่ตัวแทน {{...}} ให้อัตโนมัติ
     $('#ctFile').onchange = async (e) => {
