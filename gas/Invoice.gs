@@ -233,7 +233,7 @@ function renderReceiptPdf_(settings, inv, rc, label, style, signer) {
     footer: '',
   });
   return renderSheetPdf_(settings, tid, 'ใบเสร็จ ' + rc.number + ' ห้อง ' + inv.roomId + (label ? ' (' + label + ')' : ''),
-    inv.roomId, map, label, LABEL_CELL[style], { signer: signer, pos: SIGN_POS[style], date: shortDate_(rc.paidAt) });
+    inv.roomId, map, label, LABEL_CELL[style], { signer: signer, pos: SIGN_POS[style], date: shortDate_(rc.paidAt), rc: true });
 }
 
 function docMap_(settings, inv, o) {
@@ -268,7 +268,7 @@ function docMap_(settings, inv, o) {
  */
 const SIGN_POS = {
   classic: { img: { row: 32, col: 2, x: 72, y: 2, h: 38 }, name: { r: 33, c: 1 }, date: { r: 32, c: 3, label: 'วันที่ ' } },
-  modern: { img: { row: 29, col: 2, x: 92, y: 0, h: 42 }, name: { r: 30, c: 1 }, date: { r: 29, c: 3, label: 'วันที่  ' } },
+  modern: { img: { row: 29, col: 2, x: 92, y: 0, h: 42 }, name: { r: 30, c: 1, padL: 6, padR: 62 }, date: { r: 29, c: 1, inLine: true, clear: { r: 29, c: 3 }, label: 'วันที่  ' } },
 };
 
 /** ผู้ลงนามจาก session แอดมิน: {name, fileId, w, h} หรือ null */
@@ -305,15 +305,26 @@ function renderSheetPdf_(settings, templateId, name, roomId, map, label, labelCe
     if (sg && sg.name) {
       // ชื่อผู้ออกเอกสารใต้ลายเซ็น และวันที่
       const txt = function (pos, text, align) {
+        const f = { horizontalAlignment: align || 'CENTER', textFormat: { fontFamily: 'Sarabun', fontSize: 10 } };
+        let fields = 'userEnteredValue,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment';
+        // ระยะขอบซ้าย/ขวา ให้กึ่งกลางชื่อตรงกับกึ่งกลางเส้นลงชื่อ (เส้นไม่ได้อยู่กลางช่อง)
+        if (pos.padL != null || pos.padR != null) {
+          f.padding = { left: pos.padL || 0, right: pos.padR || 0 };
+          fields += ',userEnteredFormat.padding';
+        }
         return { updateCells: {
           range: { sheetId: 0, startRowIndex: pos.r, endRowIndex: pos.r + 1, startColumnIndex: pos.c, endColumnIndex: pos.c + 1 },
-          fields: 'userEnteredValue,userEnteredFormat.textFormat,userEnteredFormat.horizontalAlignment',
-          rows: [{ values: [{ userEnteredValue: { stringValue: text }, userEnteredFormat: {
-            horizontalAlignment: align || 'CENTER', textFormat: { fontFamily: 'Sarabun', fontSize: 10 } } }] }],
+          fields: fields,
+          rows: [{ values: [{ userEnteredValue: { stringValue: text }, userEnteredFormat: f }] }],
         } };
       };
       reqs.push(txt(sign.pos.name, '( ' + sg.name + ' )'));
-      if (sign.date) reqs.push(txt(sign.pos.date, sign.pos.date.label + sign.date, 'LEFT'));
+      const dp = sign.pos.date;
+      if (sign.date && dp.inLine) {
+        // วันที่ต่อท้ายเส้นลงชื่อในช่องเดียวกัน (ข้างลายเซ็น) และล้างช่องวันที่เดิมทางขวา
+        reqs.push(txt(dp, (sign.rc ? 'ผู้รับเงิน' : 'ผู้ออกเอกสาร') + '  ' + new Array(31).join('_') + '     ' + dp.label + sign.date, 'LEFT'));
+        reqs.push(txt(dp.clear, '', 'LEFT'));
+      } else if (sign.date) reqs.push(txt(dp, dp.label + sign.date, 'LEFT'));
     }
     gFetch_('https://sheets.googleapis.com/v4/spreadsheets/' + copy.getId() + ':batchUpdate', 'post', { requests: reqs });
     if (sg && sg.fileId) {
