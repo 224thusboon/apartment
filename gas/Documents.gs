@@ -72,7 +72,7 @@ function apiGenerateContract(token, tenancyId) {
   };
   const r = renderTemplate_(s.contractTemplateId, s.pdfFolderId,
     'สัญญาเช่า ' + t.roomId + ' ' + tenant.name, map, t.roomId,
-    function (body) { stampOwnerSign_(body, s); attachIdCard_(body, t, tenant); }, true);
+    function (body) { stampOwnerSign_(body, s); const tail = trimTail_(body); attachIdCard_(body, t, tenant, tail); }, true);
   // ผูกไฟล์สัญญากับการเข้าพักครั้งนี้ (ผู้เช่าคนถัดไปของห้องเดียวกันเปิดไม่ได้)
   DriveApp.getFileById(r.pdfId).setDescription('room:' + t.roomId + '|tenancy:' + tenancyId);
   fsUpdate_(COL.TENANCIES, tenancyId, {
@@ -120,8 +120,35 @@ function stampOwnerSign_(body, s) {
   return n;
 }
 
+/**
+ * ตัดย่อหน้าว่างท้ายเอกสาร (กันหน้าว่างเกินเมื่อแม่แบบแปลงจาก Word แล้วฟอนต์ต่างไปนิด)
+ * ย่อหน้าสุดท้ายลบไม่ได้ จึงย่อให้เล็กที่สุดแทน คืนย่อหน้านั้นถ้าว่าง
+ */
+function trimTail_(body) {
+  const ET = DocumentApp.ElementType;
+  const isBlank = function (el) {
+    if (el.getType() !== ET.PARAGRAPH) return false;
+    const p = el.asParagraph();
+    if (p.getText().replace(/\s/g, '')) return false;
+    for (let i = 0; i < p.getNumChildren(); i++) if (p.getChild(i).getType() !== ET.TEXT) return false;
+    return true;
+  };
+  let n = body.getNumChildren();
+  while (n > 1 && isBlank(body.getChild(n - 1)) && isBlank(body.getChild(n - 2))) {
+    body.removeChild(body.getChild(n - 2));
+    n--;
+  }
+  const last = body.getChild(n - 1);
+  if (!isBlank(last)) return null;
+  const p = last.asParagraph();
+  p.setSpacingBefore(0).setSpacingAfter(0).setLineSpacing(1);
+  const a = {}; a[DocumentApp.Attribute.FONT_SIZE] = 1;
+  p.setAttributes(a);
+  return p;
+}
+
 /** แนบรูปบัตรประชาชนผู้เช่าเป็นหน้าสุดท้ายของสัญญา พร้อมช่องรับรองสำเนา */
-function attachIdCard_(body, t, tenant) {
+function attachIdCard_(body, t, tenant, tail) {
   if (!t.idCardFileId) return;
   let blob;
   try { blob = DriveApp.getFileById(t.idCardFileId).getBlob(); } catch (e) { return; }
@@ -131,7 +158,8 @@ function attachIdCard_(body, t, tenant) {
     if (text) p.editAsText().setFontFamily('Sarabun').setFontSize(size || 12).setBold(!!bold);
     return p;
   };
-  body.appendPageBreak();
+  // ใส่ตัวแบ่งหน้าในย่อหน้าว่างท้ายเดิม (ไม่เพิ่มย่อหน้าใหม่ที่อาจล้นเป็นหน้าว่าง)
+  if (tail) tail.appendPageBreak(); else body.appendPageBreak();
   para('สำเนาบัตรประจำตัวประชาชนผู้เช่า', 14, true);
   para('ประกอบสัญญาเช่าห้อง ' + t.roomId, 12, false);
   const img = para('', 12).appendInlineImage(blob);
